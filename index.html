@@ -1,162 +1,84 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>职位招聘</title>
-    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <title>职位列表</title>
     <style>
-        /* 基础样式 */
-        :root {--primary: #409EFF; --gray: #909399;}
-        body {font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; background: #f5f7fa;}
-
-        /* 设备检测 */
-        .pc-alert {display:none;position:fixed;width:100vw;height:100vh;background:#fff;justify-content:center;align-items:center;}
-        
-        /* 数据容器 */
-        .container {padding:12px;max-width:600px;margin:0 auto;}
-        
-        /* 列表页 */
-        .banner {height:160px;background:linear-gradient(135deg,#6b8dd6,#8e37d7);border-radius:12px;margin-bottom:16px;}
-        .job-card {background:#fff;padding:16px;margin-bottom:12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.05);}
-        .job-card h3 {margin:0;color:#303133;font-size:17px;}
-        .job-meta {margin-top:8px;display:flex;justify-content:space-between;color:var(--gray);}
-        
-        /* 详情页 */
-        .detail-section {background:#fff;padding:16px;margin-bottom:12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.05);}
-        .fixed-footer {position:fixed;bottom:0;left:0;right:0;background:#fff;padding:12px;display:flex;gap:8px;box-shadow:0 -2px 8px rgba(0,0,0,0.05);}
-        .btn {flex:1;padding:12px;border:none;border-radius:6px;font-size:16px;}
-        .btn-share {background:#fff;border:1px solid #dcdfe6;color:var(--gray);}
-        .btn-apply {background:var(--primary);color:#fff;}
-        
-        /* 弹窗 */
-        .modal {display:none;position:fixed;top:0;bottom:0;left:0;right:0;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;}
-        .modal-content {background:#fff;padding:24px;border-radius:12px;text-align:center;}
-        .qrcode {width:180px;height:180px;margin:12px auto;background:#f5f7fa url('https://tiebapic.baidu.com/forum/w%3D580/sign=b6e7…au=2025-04-12-05_fe58bf1f7caf6821c86ae9e8cd42e309') no-repeat center;} /* 二维码占位图 */
-
-        @media (min-width:768px) {.pc-alert{display:flex;}}
+        /* 简约风格样式 */
+        .pc-alert {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #fff;
+            z-index: 9999;
+            padding: 20px;
+            text-align: center;
+        }
+        .banner {
+            height: 180px;
+            background: #f5f7fa;
+        }
+        .banner img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .job-list {
+            padding: 15px;
+        }
+        .job-item {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+        .job-title {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        .job-info {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+        .salary {
+            color: #ff5a5f;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
     <div class="pc-alert">请使用手机访问本页面</div>
-
-    <!-- 列表页 -->
-    <div id="listPage" class="container">
-        <div class="banner"></div>
-        <div id="jobsList"></div>
+    
+    <div class="banner">
+        <img src="data.json中的BANNER_URL" alt="招聘banner">
     </div>
 
-    <!-- 详情页 -->
-    <div id="detailPage" class="container" style="display:none;">
-        <div class="detail-section">
-            <h1 id="jobTitle"></h1>
-            <div style="margin-top:12px;color:var(--gray);">
-                <span id="jobLocation"></span>
-                <span style="float:right;color:var(--primary);" id="jobSalary"></span>
-            </div>
-        </div>
-        <div class="detail-section">
-            <h3 style="margin-bottom:12px;">任职要求</h3>
-            <ul id="jobRequirements" style="padding-left:20px;color:#606266;"></ul>
-        </div>
-        <div class="fixed-footer">
-            <button class="btn btn-share" onclick="showShareTip()">分享</button>
-            <button class="btn btn-apply" onclick="showModal()">立即申请</button>
-        </div>
-    </div>
+    <div class="job-list" id="jobList"></div>
 
-    <!-- 弹窗 -->
-    <div class="modal" onclick="hideModal()">
-        <div class="modal-content">
-            <h3>微信扫码申请</h3>
-            <div class="qrcode"></div>
-            <p>长按二维码保存</p>
-        </div>
-    </div>
+    <script>
+        // PC访问检测
+        if(window.innerWidth > 768) document.querySelector('.pc-alert').style.display = 'block';
 
-<script>
-// 数据存储（维护人员只需修改这个数组）
-const jobsData = [
-    {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "11-25K",
-        requirements: ["3年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-      {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "12-25K",
-        requirements: ["4年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-      {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "13-25K",
-        requirements: ["5年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-      {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "14-25K",
-        requirements: ["6年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-     {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "14-25K",
-        requirements: ["6年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-     {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "14-25K",
-        requirements: ["6年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-     {
-        title: "前端开发工程师",
-        location: "北京",
-        salary: "14-25K",
-        requirements: ["6年以上前端开发经验", "精通Vue/React框架", "熟悉Webpack等构建工具"]
-    },
-    // 其他9个岗位数据...
-]
-
-// 页面逻辑
-function renderJobs() {
-    document.getElementById('jobsList').innerHTML = jobsData.map(job => `
-        <div class="job-card" onclick="showDetail(${jobsData.indexOf(job)})">
-            <h3>${job.title}</h3>
-            <div class="job-meta">
-                <span>${job.location}</span>
-                <span>${job.salary}</span>
-            </div>
-        </div>
-    `).join('')
-}
-
-function showDetail(index) {
-    const job = jobsData[index]
-    document.getElementById('listPage').style.display = 'none'
-    document.getElementById('detailPage').style.display = 'block'
-    document.getElementById('jobTitle').textContent = job.title
-    document.getElementById('jobLocation').textContent = job.location
-    document.getElementById('jobSalary').textContent = job.salary
-    document.getElementById('jobRequirements').innerHTML = 
-        job.requirements.map(r => `<li>${r}</li>`).join('')
-}
-
-// 弹窗控制
-function showModal() {document.querySelector('.modal').style.display = 'flex'}
-function hideModal() {document.querySelector('.modal').style.display = 'none'}
-function showShareTip() {alert('请点击微信右上角的分享按钮')}
-
-// 初始化
-window.onload = () => {
-    if(/Mobi|Android|iPhone/i.test(navigator.userAgent)) {
-        renderJobs()
-    }
-}
-</script>
+        // 加载职位数据
+        fetch('data.json').then(r => r.json()).then(data => {
+            let html = '';
+            data.jobs.forEach(job => {
+                html += `<div class="job-item" onclick="location.href='detail.html?id=${job.id}'">
+                            <div class="job-title">${job.title}</div>
+                            <div class="job-info">📍 ${job.location}</div>
+                            <div class="job-info salary">💰 ${job.salary}</div>
+                         </div>`;
+            });
+            document.getElementById('jobList').innerHTML = html;
+        });
+    </script>
 </body>
 </html>
