@@ -66,7 +66,7 @@
 
     <div class="qrcode-modal" onclick="this.style.display='none'">
         <div class="qrcode-box">
-            <img src="./qrcode.png" width="160" alt="微信投递">
+            <img src="wechat-qrcode.png" width="160" alt="微信投递">
             <p style="margin-top:10px;">扫码微信沟通</p>
         </div>
     </div>
