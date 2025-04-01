@@ -1,0 +1,104 @@
+<!-- detail.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>职位详情</title>
+    <style>
+        .container { padding: 15px; }
+        .title { font-size: 22px; color: #333; margin-bottom: 12px; }
+        .info { color: #666; margin-bottom: 10px; }
+        .section { 
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+        .footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #fff;
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            box-shadow: 0 -2px 12px rgba(0,0,0,0.05);
+        }
+        .btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .share { background: #f0f2f5; color: #666; }
+        .apply { background: #00c853; color: white; }
+        .qrcode-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+        .qrcode-box { 
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="section" id="jobContent"></div>
+    </div>
+
+    <div class="footer">
+        <div class="btn share" onclick="showShareTip()">分享职位</div>
+        <div class="btn apply" onclick="showQRCode()">立即投递</div>
+    </div>
+
+    <div class="qrcode-modal" onclick="this.style.display='none'">
+        <div class="qrcode-box">
+            <img src="wechat-qrcode.png" width="160" alt="微信投递">
+            <p style="margin-top:10px;">扫码微信沟通</p>
+        </div>
+    </div>
+
+    <script>
+        // 获取职位ID
+        const urlParams = new URLSearchParams(location.search);
+        const jobId = parseInt(urlParams.get('id'));
+
+        // 加载数据
+        fetch('data.json').then(r => r.json()).then(data => {
+            const job = data.jobs.find(j => j.id === jobId);
+            if(job) {
+                document.getElementById('jobContent').innerHTML = `
+                    <h1 class="title">${job.title}</h1>
+                    <div class="info">📍 ${job.location}</div>
+                    <div class="info" style="color:#00c853;">💰 ${job.salary}</div>
+                    <h3>任职要求</h3>
+                    <p>${job.qualification.replace(/\n/g, '<br>')}</p>
+                    <h3>岗位职责</h3>
+                    <p>${job.requirements.replace(/\n/g, '<br>')}</p>
+                `;
+            }
+        });
+
+        function showQRCode() {
+            document.querySelector('.qrcode-modal').style.display = 'flex';
+        }
+
+        function showShareTip() {
+            alert("点击微信右上角 ⋯ 按钮分享");
+        }
+    </script>
+</body>
+</html>
