@@ -477,7 +477,7 @@
         var CARD_ASPECT = 1.585;          // 身份证宽高比 (85.6mm / 54mm)
         var REQUIRED_FRAMES = 12;         // 连续合格帧数触发自动拍照 (约1.2s)
         var DETECT_INTERVAL = 100;        // 检测间隔 ms
-        var GUIDE_WIDTH_RATIO = 0.82;     // 引导框宽度占视频宽度比例
+        var GUIDE_WIDTH_RATIO = 0.88;     // 引导框宽度占视频宽度比例（收紧，减少白边）
         var JPEG_QUALITY = 0.92;
 
         // ========================
@@ -652,74 +652,56 @@
         // ========================
         function detectWithOpenCV() {
             var src = null, gray = null, edges = null, contours = null, hierarchy = null;
+            var blurred = null, kernel = null, closed = null;
+            var thresh = null, edges2 = null, contours2 = null, hierarchy2 = null;
             try {
                 src = cv.imread(video);
                 gray = new cv.Mat();
+                blurred = new cv.Mat();
                 edges = new cv.Mat();
                 contours = new cv.MatVector();
                 hierarchy = new cv.Mat();
 
                 cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-                cv.Canny(gray, edges, 50, 150);
-                cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+                // 双边滤波：保边去噪（比高斯模糊更适合边缘检测）
+                cv.bilateralFilter(gray, blurred, 5, 75, 75);
 
                 var guideArea = guide.width * guide.height;
-                var bestQuad = null;
-                var bestArea = 0;
 
-                for (var i = 0; i < contours.size(); i++) {
-                    var cnt = contours.get(i);
-                    var area = cv.contourArea(cnt);
+                // ===== 策略1: 低阈值 Canny + 形态学闭运算（处理低对比度白底场景） =====
+                cv.Canny(blurred, edges, 25, 80);
+                kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
+                closed = new cv.Mat();
+                cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel);
 
-                    if (area < guideArea * 0.15) {
-                        cnt.delete();
-                        continue;
-                    }
+                cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-                    var peri = cv.arcLength(cnt, false);
-                    var approx = new cv.Mat();
-                    cv.approxPolyDP(cnt, approx, 0.02 * peri, false);
+                var bestQuad = findBestCardContour(contours, guideArea);
 
-                    if (approx.rows === 4) {
-                        var quad = [];
-                        for (var j = 0; j < 4; j++) {
-                            quad.push({
-                                x: approx.data32S[j * 2],
-                                y: approx.data32S[j * 2 + 1]
-                            });
-                        }
-
-                        // 检查四个角是否都在引导框内（含容差）
-                        var margin = 8;
-                        var allInside = quad.every(function (p) {
-                            return p.x >= guide.x - margin &&
-                                   p.x <= guide.x + guide.width + margin &&
-                                   p.y >= guide.y - margin &&
-                                   p.y <= guide.y + guide.height + margin;
-                        });
-
-                        if (allInside && area > bestArea) {
-                            bestArea = area;
-                            bestQuad = quad;
-                        }
-                    }
-
-                    approx.delete();
-                    cnt.delete();
+                // ===== 策略2: 自适应阈值（Canny 失败时，适合白底白卡场景） =====
+                if (!bestQuad) {
+                    thresh = new cv.Mat();
+                    cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                         cv.THRESH_BINARY_INV, 31, 5);
+                    edges2 = new cv.Mat();
+                    cv.Canny(thresh, edges2, 30, 90);
+                    contours2 = new cv.MatVector();
+                    hierarchy2 = new cv.Mat();
+                    cv.findContours(edges2, contours2, hierarchy2, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+                    bestQuad = findBestCardContour(contours2, guideArea);
                 }
 
-                if (bestQuad && bestArea > guideArea * 0.35) {
-                    // 额外检查亮度
+                if (bestQuad && bestQuad.area > guideArea * 0.25) {
                     var mean = cv.mean(gray);
                     var brightness = mean[0];
-                    if (brightness < 40) {
+                    if (brightness < 35) {
                         return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
                     }
-                    if (brightness > 235) {
+                    if (brightness > 240) {
                         return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
                     }
-                    return { compliant: true, corners: bestQuad, reason: '' };
+                    return { compliant: true, corners: bestQuad.corners, reason: '' };
                 }
 
                 return { compliant: false, corners: null, reason: '请将身份证四角完整放入框内' };
@@ -730,10 +712,77 @@
             } finally {
                 if (src) src.delete();
                 if (gray) gray.delete();
+                if (blurred) blurred.delete();
                 if (edges) edges.delete();
                 if (contours) contours.delete();
                 if (hierarchy) hierarchy.delete();
+                if (kernel) kernel.delete();
+                if (closed) closed.delete();
+                if (thresh) thresh.delete();
+                if (edges2) edges2.delete();
+                if (contours2) contours2.delete();
+                if (hierarchy2) hierarchy2.delete();
             }
+        }
+
+        // 在轮廓集合中找到最符合身份证特征的四边形
+        function findBestCardContour(contours, guideArea) {
+            var bestQuad = null;
+            var bestArea = 0;
+            var margin = 12;
+
+            for (var i = 0; i < contours.size(); i++) {
+                var cnt = contours.get(i);
+                var area = cv.contourArea(cnt);
+
+                if (area < guideArea * 0.15) {
+                    cnt.delete();
+                    continue;
+                }
+
+                var peri = cv.arcLength(cnt, true);
+                var approx = new cv.Mat();
+                // 更小的 epsilon = 更贴合实际边缘，减少白边
+                cv.approxPolyDP(cnt, approx, 0.015 * peri, true);
+
+                if (approx.rows === 4) {
+                    var quad = [];
+                    for (var j = 0; j < 4; j++) {
+                        quad.push({
+                            x: approx.data32S[j * 2],
+                            y: approx.data32S[j * 2 + 1]
+                        });
+                    }
+
+                    // 四角必须在引导框内
+                    var allInside = quad.every(function (p) {
+                        return p.x >= guide.x - margin &&
+                               p.x <= guide.x + guide.width + margin &&
+                               p.y >= guide.y - margin &&
+                               p.y <= guide.y + guide.height + margin;
+                    });
+
+                    // 检查宽高比是否接近身份证比例 (1.585)
+                    var w1 = dist(quad[0], quad[1]);
+                    var w2 = dist(quad[3], quad[2]);
+                    var h1 = dist(quad[0], quad[3]);
+                    var h2 = dist(quad[1], quad[2]);
+                    var w = Math.max(w1, w2);
+                    var h = Math.max(h1, h2);
+                    var aspect = w / h;
+                    var aspectOK = aspect > 1.15 && aspect < 2.1;
+
+                    if (allInside && aspectOK && area > bestArea) {
+                        bestArea = area;
+                        bestQuad = { corners: quad, area: area };
+                    }
+                }
+
+                approx.delete();
+                cnt.delete();
+            }
+
+            return bestQuad;
         }
 
         // ========================
@@ -742,51 +791,74 @@
         function detectFallback() {
             try {
                 var tmpCanvas = document.createElement('canvas');
-                tmpCanvas.width = video.videoWidth;
-                tmpCanvas.height = video.videoHeight;
+                // 缩小到 1/2 提速
+                var sw = Math.round(video.videoWidth / 2);
+                var sh = Math.round(video.videoHeight / 2);
+                tmpCanvas.width = sw;
+                tmpCanvas.height = sh;
                 var tctx = tmpCanvas.getContext('2d');
-                tctx.drawImage(video, 0, 0);
+                tctx.drawImage(video, 0, 0, sw, sh);
 
-                var margin = 6;
-                // 采样引导框内边沿区域与外部区域的亮度差异
+                // 按比例缩放引导框
+                var gx = guide.x / 2, gy = guide.y / 2;
+                var gw = guide.width / 2, gh = guide.height / 2;
+
+                // 采样引导框内中心区域
+                var margin = 8;
                 var innerData = tctx.getImageData(
-                    guide.x + margin, guide.y + margin,
-                    guide.width - 2 * margin, guide.height - 2 * margin
+                    gx + margin, gy + margin,
+                    gw - 2 * margin, gh - 2 * margin
                 );
-                var outerTop = tctx.getImageData(guide.x, guide.y - margin - 2, guide.width, 3);
-                var outerBottom = tctx.getImageData(guide.x, guide.y + guide.height + 2, guide.width, 3);
-                var outerLeft = tctx.getImageData(guide.x - margin - 2, guide.y, 3, guide.height);
-                var outerRight = tctx.getImageData(guide.x + guide.width + 2, guide.y, 3, guide.height);
-
                 var innerAvg = avgBrightness(innerData);
+
+                // 亮度检查
+                if (innerAvg < 35) return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
+                if (innerAvg > 240) return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
+
+                // 使用局部梯度检测边缘（比绝对亮度差更适合白底白卡）
+                // 在引导框四条边线位置采样，检测是否存在明显的梯度变化
+                var edgeThick = 4;
+                var innerEdge = tctx.getImageData(
+                    gx + margin, gy + margin,
+                    gw - 2 * margin, gh - 2 * margin
+                );
+                var outerTop = tctx.getImageData(gx, Math.max(0, gy - edgeThick), gw, edgeThick);
+                var outerBottom = tctx.getImageData(gx, Math.min(sh - edgeThick, gy + gh), gw, edgeThick);
+                var outerLeft = tctx.getImageData(Math.max(0, gx - edgeThick), gy, edgeThick, gh);
+                var outerRight = tctx.getImageData(Math.min(sw - edgeThick, gx + gw), gy, edgeThick, gh);
+
+                // 计算各区域亮度均值和标准差
                 var outerTopAvg = avgBrightness(outerTop);
                 var outerBottomAvg = avgBrightness(outerBottom);
                 var outerLeftAvg = avgBrightness(outerLeft);
                 var outerRightAvg = avgBrightness(outerRight);
 
+                // 白底白卡场景：差异可能很小，改用纹理方差检测
+                var innerVar = colorVariance(innerEdge);
+                var outerTopVar = colorVariance(outerTop);
+                var outerBottomVar = colorVariance(outerBottom);
+                var outerLeftVar = colorVariance(outerLeft);
+                var outerRightVar = colorVariance(outerRight);
+
+                // 卡片内部应该有文字纹理（方差较大），外部纯色桌面方差较小
+                // 或者内外有明显亮度差
                 var diffTop = Math.abs(innerAvg - outerTopAvg);
                 var diffBottom = Math.abs(innerAvg - outerBottomAvg);
                 var diffLeft = Math.abs(innerAvg - outerLeftAvg);
                 var diffRight = Math.abs(innerAvg - outerRightAvg);
 
-                // 检查内部方差（卡片表面相对均匀）
-                var variance = colorVariance(innerData);
+                var hasBrightnessDiff = diffTop > 18 || diffBottom > 18 ||
+                                         diffLeft > 18 || diffRight > 18;
+                var hasTextureDiff = (innerVar > 15 && innerVar > outerTopVar * 1.3 &&
+                                      innerVar > outerBottomVar * 1.3);
 
-                // 四边都有明显差异且内部较为均匀 → 视为合格
-                var threshold = 25;
-                var allSidesDiff = diffTop > threshold && diffBottom > threshold &&
-                                   diffLeft > threshold && diffRight > threshold;
-                var reasonableVariance = variance < 80 && variance > 5;
-                var reasonableBrightness = innerAvg > 50 && innerAvg < 220;
-
-                if (allSidesDiff && reasonableVariance && reasonableBrightness) {
+                if ((hasBrightnessDiff || hasTextureDiff) && innerVar > 5 && innerAvg > 40 && innerAvg < 230) {
                     return { compliant: true, corners: null, reason: '' };
                 }
 
-                if (innerAvg < 40) return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
-                if (innerAvg > 235) return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
                 return { compliant: false, corners: null, reason: '请将身份证四角完整放入框内' };
             } catch (e) {
+                console.error('[Fallback] 检测出错:', e);
                 return { compliant: false, corners: null, reason: '检测异常' };
             }
         }
@@ -1059,13 +1131,25 @@
                 cv.warpPerspective(src, dst, M, new cv.Size(outW, outH),
                     cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 255));
 
-                // 输出到临时 canvas 再转 dataURL
+                // 输出到临时 canvas
                 var outCanvas = document.createElement('canvas');
                 outCanvas.width = outW;
                 outCanvas.height = outH;
                 cv.imshow(outCanvas, dst);
 
-                return outCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
+                // 裁掉边缘 2%（消除检测误差导致的白边/阴影）
+                var trim = 0.02;
+                var trimX = Math.round(outW * trim);
+                var trimY = Math.round(outH * trim);
+                var finalCanvas = document.createElement('canvas');
+                finalCanvas.width = outW - 2 * trimX;
+                finalCanvas.height = outH - 2 * trimY;
+                var fctx = finalCanvas.getContext('2d');
+                fctx.drawImage(outCanvas, trimX, trimY,
+                              finalCanvas.width, finalCanvas.height,
+                              0, 0, finalCanvas.width, finalCanvas.height);
+
+                return finalCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
             } catch (e) {
                 console.error('[CV] 透视变换失败:', e);
                 return null;
@@ -1086,12 +1170,19 @@
             var tctx = tmpCanvas.getContext('2d');
             tctx.drawImage(video, 0, 0);
 
+            // 引导框比身份证大，裁掉边缘 4% 收紧到卡片主体
+            var trim = 0.04;
+            var cropX = guide.x + guide.width * trim;
+            var cropY = guide.y + guide.height * trim;
+            var cropW = guide.width * (1 - 2 * trim);
+            var cropH = guide.height * (1 - 2 * trim);
+
             var cropCanvas = document.createElement('canvas');
-            cropCanvas.width = guide.width;
-            cropCanvas.height = guide.height;
+            cropCanvas.width = Math.round(cropW);
+            cropCanvas.height = Math.round(cropH);
             var cctx = cropCanvas.getContext('2d');
-            cctx.drawImage(tmpCanvas, guide.x, guide.y, guide.width, guide.height,
-                          0, 0, guide.width, guide.height);
+            cctx.drawImage(tmpCanvas, cropX, cropY, cropW, cropH,
+                          0, 0, cropCanvas.width, cropCanvas.height);
 
             return cropCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
         }
