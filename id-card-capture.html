@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>身份证信息采集</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f0f2f5;
+            color: #1a1a1a;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+        }
+
+        /* ===== Loading ===== */
+        .loading-screen {
+            position: fixed;
+            inset: 0;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #1677ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        /* ===== Screens ===== */
+        .screen {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* ===== Start Screen ===== */
+        .start-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 40px 24px;
+            width: 100%;
+            text-align: center;
+            margin-top: 60px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .start-card h1 {
+            font-size: 24px;
+            margin-bottom: 24px;
+            color: #1a1a1a;
+        }
+
+        .start-card .icon-wrap {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 20px;
+            background: #e6f0ff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+        }
+
+        .tips {
+            text-align: left;
+            background: #f6f8fa;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+
+        .tips p {
+            font-size: 14px;
+            color: #555;
+            line-height: 2;
+        }
+
+        /* ===== Buttons ===== */
+        .btn-primary {
+            background: #1677ff;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 14px 32px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .btn-primary:hover {
+            background: #0958d9;
+        }
+
+        .btn-primary:active {
+            transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: #fff;
+            color: #1677ff;
+            border: 1.5px solid #1677ff;
+            border-radius: 10px;
+            padding: 14px 32px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .btn-secondary:active {
+            transform: scale(0.98);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            width: 100%;
+        }
+
+        /* ===== Camera Screen ===== */
+        .camera-header {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .camera-header h2 {
+            font-size: 18px;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+        }
+
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .step-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+            background: #e0e0e0;
+            color: #999;
+            transition: all 0.3s;
+        }
+
+        .step-dot.active {
+            background: #1677ff;
+            color: #fff;
+        }
+
+        .step-dot.done {
+            background: #52c41a;
+            color: #fff;
+        }
+
+        .step-bar {
+            width: 40px;
+            height: 2px;
+            background: #e0e0e0;
+        }
+
+        .step-bar.done {
+            background: #52c41a;
+        }
+
+        .camera-wrap {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .camera-wrap video {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+        }
+
+        .camera-wrap canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .flash-overlay {
+            position: absolute;
+            inset: 0;
+            background: #fff;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease-out;
+        }
+
+        .flash-overlay.flash-active {
+            opacity: 0.9;
+            transition: none;
+        }
+
+        .status-bar {
+            width: 100%;
+            text-align: center;
+            padding: 16px;
+            font-size: 15px;
+            color: #666;
+            min-height: 52px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .status-bar.success { color: #52c41a; font-weight: 500; }
+        .status-bar.warning { color: #faad14; }
+        .status-bar.error { color: #ff4d4f; }
+
+        .camera-actions {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .btn-capture {
+            background: #fff;
+            color: #1677ff;
+            border: 1.5px solid #1677ff;
+            border-radius: 10px;
+            padding: 12px 28px;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-capture:active { transform: scale(0.98); }
+
+        /* ===== Preview Screen ===== */
+        .preview-header {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+
+        .preview-header h2 {
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        .preview-header p {
+            font-size: 13px;
+            color: #999;
+        }
+
+        .preview-image-wrap {
+            background: #fff;
+            border-radius: 16px;
+            padding: 16px;
+            width: 100%;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+            margin-bottom: 16px;
+        }
+
+        .preview-image-wrap img {
+            width: 100%;
+            border-radius: 8px;
+            display: block;
+        }
+
+        .preview-actions {
+            width: 100%;
+            display: flex;
+            gap: 12px;
+        }
+
+        /* ===== Complete Screen ===== */
+        .complete-header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .complete-header .success-icon {
+            width: 56px;
+            height: 56px;
+            background: #f6ffed;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 12px;
+            font-size: 28px;
+        }
+
+        .complete-header h2 {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        .complete-header p {
+            font-size: 14px;
+            color: #999;
+        }
+
+        .complete-images {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .complete-image-item {
+            background: #fff;
+            border-radius: 12px;
+            padding: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        .complete-image-item label {
+            display: block;
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .complete-image-item img {
+            width: 100%;
+            border-radius: 6px;
+            display: block;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 480px) {
+            body { padding: 12px; }
+            .start-card { padding: 32px 20px; margin-top: 40px; }
+            .camera-header h2 { font-size: 16px; }
+            .tips p { font-size: 13px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 加载页 -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="spinner"></div>
+        <p class="loading-text" id="loading-text">正在加载识别组件...</p>
+    </div>
+
+    <!-- 开始页 -->
+    <div id="start-screen" class="screen" style="display:none">
+        <div class="start-card">
+            <div class="icon-wrap">🪪</div>
+            <h1>身份证信息采集</h1>
+            <div class="tips">
+                <p>📋 请准备身份证原件（正面 + 背面）</p>
+                <p>💡 请在光线充足、无反光的环境下操作</p>
+                <p>📷 将身份证放入屏幕引导框，系统自动检测并拍照</p>
+                <p>✅ 四角全部入框后边框变绿，自动完成拍摄</p>
+            </div>
+            <button id="start-btn" class="btn-primary">开始采集</button>
+        </div>
+    </div>
+
+    <!-- 拍照页 -->
+    <div id="camera-screen" class="screen" style="display:none">
+        <div class="camera-header">
+            <h2 id="camera-title">拍摄身份证 — 正面</h2>
+            <div class="step-indicator">
+                <span class="step-dot active" id="step-1">1</span>
+                <span class="step-bar" id="bar-1"></span>
+                <span class="step-dot" id="step-2">2</span>
+                <span class="step-bar" id="bar-2"></span>
+                <span class="step-dot" id="step-3">3</span>
+            </div>
+        </div>
+        <div class="camera-wrap" id="camera-wrap">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="overlay"></canvas>
+            <div class="flash-overlay" id="flash-overlay"></div>
+        </div>
+        <div class="status-bar" id="status-text">请将身份证放入框内</div>
+        <div class="camera-actions">
+            <button id="manual-btn" class="btn-capture">手动拍照</button>
+        </div>
+    </div>
+
+    <!-- 预览页 -->
+    <div id="preview-screen" class="screen" style="display:none">
+        <div class="preview-header">
+            <h2 id="preview-title">预览 — 正面</h2>
+            <p>请确认身份证信息清晰完整</p>
+        </div>
+        <div class="preview-image-wrap">
+            <img id="preview-image" alt="预览图">
+        </div>
+        <div class="preview-actions">
+            <button id="retake-btn" class="btn-secondary">重新拍摄</button>
+            <button id="confirm-btn" class="btn-primary">确认使用</button>
+        </div>
+    </div>
+
+    <!-- 完成页 -->
+    <div id="complete-screen" class="screen" style="display:none">
+        <div class="complete-header">
+            <div class="success-icon">✅</div>
+            <h2>采集完成</h2>
+            <p>请确认以下身份证信息</p>
+        </div>
+        <div class="complete-images">
+            <div class="complete-image-item">
+                <label>身份证正面</label>
+                <img id="final-front" alt="正面">
+            </div>
+            <div class="complete-image-item">
+                <label>身份证背面</label>
+                <img id="final-back" alt="背面">
+            </div>
+        </div>
+        <button id="submit-btn" class="btn-primary">提交信息</button>
+    </div>
+
+    <!-- OpenCV.js -->
+    <script async src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+    <script>
+    (function () {
+        'use strict';
+
+        // ========================
+        // 配置常量
+        // ========================
+        var CARD_ASPECT = 1.585;          // 身份证宽高比 (85.6mm / 54mm)
+        var REQUIRED_FRAMES = 12;         // 连续合格帧数触发自动拍照 (约1.2s)
+        var DETECT_INTERVAL = 100;        // 检测间隔 ms
+        var GUIDE_WIDTH_RATIO = 0.82;     // 引导框宽度占视频宽度比例
+        var JPEG_QUALITY = 0.92;
+
+        // ========================
+        // DOM 元素
+        // ========================
+        var $ = function (id) { return document.getElementById(id); };
+        var loadingScreen = $('loading-screen');
+        var loadingText = $('loading-text');
+        var startScreen = $('start-screen');
+        var cameraScreen = $('camera-screen');
+        var previewScreen = $('preview-screen');
+        var completeScreen = $('complete-screen');
+        var video = $('video');
+        var overlay = $('overlay');
+        var overlayCtx = overlay.getContext('2d');
+        var flashEl = $('flash-overlay');
+        var statusText = $('status-text');
+        var cameraWrap = $('camera-wrap');
+        var cameraTitle = $('camera-title');
+        var previewTitle = $('preview-title');
+        var previewImage = $('preview-image');
+
+        // ========================
+        // 状态
+        // ========================
+        var cvReady = false;
+        var cvFallback = false;
+        var stream = null;
+        var guide = { x: 0, y: 0, width: 0, height: 0 };
+        var detection = { compliant: false, corners: null, reason: '' };
+        var consecutiveFrames = 0;
+        var currentSide = 'front'; // 'front' | 'back'
+        var frontDataUrl = null;
+        var backDataUrl = null;
+        var isCapturing = false;
+        var rafId = null;
+        var lastDetectTime = 0;
+
+        // ========================
+        // OpenCV.js 加载检测
+        // ========================
+        function checkCv() {
+            if (window.cv && cv.Mat) {
+                cvReady = true;
+                console.log('[CV] OpenCV.js 已就绪');
+                enterStartScreen();
+            } else {
+                setTimeout(checkCv, 300);
+            }
+        }
+
+        // 15秒超时降级
+        setTimeout(function () {
+            if (!cvReady) {
+                cvFallback = true;
+                console.warn('[CV] OpenCV.js 加载超时，降级为基础检测模式');
+                enterStartScreen();
+            }
+        }, 15000);
+
+        function enterStartScreen() {
+            loadingScreen.style.display = 'none';
+            startScreen.style.display = 'flex';
+        }
+
+        // ========================
+        // 摄像头初始化
+        // ========================
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                await new Promise(function (resolve) {
+                    video.onloadedmetadata = resolve;
+                });
+                await video.play();
+
+                // 设置 canvas 尺寸 = 视频原始分辨率
+                overlay.width = video.videoWidth;
+                overlay.height = video.videoHeight;
+
+                // 设置容器宽高比与视频一致
+                cameraWrap.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
+
+                // 计算引导框
+                var gw = overlay.width * GUIDE_WIDTH_RATIO;
+                var gh = gw / CARD_ASPECT;
+                // 如果高度超出视频，以高度为基准
+                if (gh > overlay.height * 0.7) {
+                    gh = overlay.height * 0.7;
+                    gw = gh * CARD_ASPECT;
+                }
+                guide = {
+                    x: (overlay.width - gw) / 2,
+                    y: (overlay.height - gh) / 2,
+                    width: gw,
+                    height: gh
+                };
+
+                console.log('[Camera] 视频尺寸:', video.videoWidth, 'x', video.videoHeight);
+                console.log('[Guide]', JSON.stringify(guide));
+
+                startDetectionLoop();
+            } catch (err) {
+                console.error('[Camera] 摄像头启动失败:', err);
+                statusText.textContent = '无法访问摄像头，请检查权限设置';
+                statusText.className = 'status-bar error';
+            }
+        }
+
+        function stopCamera() {
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+            if (stream) {
+                stream.getTracks().forEach(function (t) { t.stop(); });
+                stream = null;
+            }
+        }
+
+        // ========================
+        // 检测主循环
+        // ========================
+        function startDetectionLoop() {
+            consecutiveFrames = 0;
+            isCapturing = false;
+            lastDetectTime = 0;
+
+            function loop(timestamp) {
+                if (isCapturing) return;
+
+                // 节流：每隔 DETECT_INTERVAL 执行检测
+                if (timestamp - lastDetectTime >= DETECT_INTERVAL) {
+                    lastDetectTime = timestamp;
+                    if (cvReady) {
+                        detection = detectWithOpenCV();
+                    } else {
+                        detection = detectFallback();
+                    }
+
+                    if (detection.compliant) {
+                        consecutiveFrames++;
+                    } else {
+                        consecutiveFrames = 0;
+                    }
+
+                    // 达到连续帧数要求 → 自动拍照
+                    if (consecutiveFrames >= REQUIRED_FRAMES) {
+                        autoCapture();
+                        return;
+                    }
+                }
+
+                drawOverlay();
+                updateStatus();
+                rafId = requestAnimationFrame(loop);
+            }
+
+            rafId = requestAnimationFrame(loop);
+        }
+
+        // ========================
+        // OpenCV.js 检测
+        // ========================
+        function detectWithOpenCV() {
+            var src = null, gray = null, edges = null, contours = null, hierarchy = null;
+            try {
+                src = cv.imread(video);
+                gray = new cv.Mat();
+                edges = new cv.Mat();
+                contours = new cv.MatVector();
+                hierarchy = new cv.Mat();
+
+                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+                cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+                cv.Canny(gray, edges, 50, 150);
+                cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+                var guideArea = guide.width * guide.height;
+                var bestQuad = null;
+                var bestArea = 0;
+
+                for (var i = 0; i < contours.size(); i++) {
+                    var cnt = contours.get(i);
+                    var area = cv.contourArea(cnt);
+
+                    if (area < guideArea * 0.15) {
+                        cnt.delete();
+                        continue;
+                    }
+
+                    var peri = cv.arcLength(cnt, false);
+                    var approx = new cv.Mat();
+                    cv.approxPolyDP(cnt, approx, 0.02 * peri, false);
+
+                    if (approx.rows === 4) {
+                        var quad = [];
+                        for (var j = 0; j < 4; j++) {
+                            quad.push({
+                                x: approx.data32S[j * 2],
+                                y: approx.data32S[j * 2 + 1]
+                            });
+                        }
+
+                        // 检查四个角是否都在引导框内（含容差）
+                        var margin = 8;
+                        var allInside = quad.every(function (p) {
+                            return p.x >= guide.x - margin &&
+                                   p.x <= guide.x + guide.width + margin &&
+                                   p.y >= guide.y - margin &&
+                                   p.y <= guide.y + guide.height + margin;
+                        });
+
+                        if (allInside && area > bestArea) {
+                            bestArea = area;
+                            bestQuad = quad;
+                        }
+                    }
+
+                    approx.delete();
+                    cnt.delete();
+                }
+
+                if (bestQuad && bestArea > guideArea * 0.35) {
+                    // 额外检查亮度
+                    var mean = cv.mean(gray);
+                    var brightness = mean[0];
+                    if (brightness < 40) {
+                        return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
+                    }
+                    if (brightness > 235) {
+                        return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
+                    }
+                    return { compliant: true, corners: bestQuad, reason: '' };
+                }
+
+                return { compliant: false, corners: null, reason: '请将身份证四角完整放入框内' };
+
+            } catch (e) {
+                console.error('[CV] 检测出错:', e);
+                return { compliant: false, corners: null, reason: '检测异常' };
+            } finally {
+                if (src) src.delete();
+                if (gray) gray.delete();
+                if (edges) edges.delete();
+                if (contours) contours.delete();
+                if (hierarchy) hierarchy.delete();
+            }
+        }
+
+        // ========================
+        // 降级检测（无 OpenCV.js）
+        // ========================
+        function detectFallback() {
+            try {
+                var tmpCanvas = document.createElement('canvas');
+                tmpCanvas.width = video.videoWidth;
+                tmpCanvas.height = video.videoHeight;
+                var tctx = tmpCanvas.getContext('2d');
+                tctx.drawImage(video, 0, 0);
+
+                var margin = 6;
+                // 采样引导框内边沿区域与外部区域的亮度差异
+                var innerData = tctx.getImageData(
+                    guide.x + margin, guide.y + margin,
+                    guide.width - 2 * margin, guide.height - 2 * margin
+                );
+                var outerTop = tctx.getImageData(guide.x, guide.y - margin - 2, guide.width, 3);
+                var outerBottom = tctx.getImageData(guide.x, guide.y + guide.height + 2, guide.width, 3);
+                var outerLeft = tctx.getImageData(guide.x - margin - 2, guide.y, 3, guide.height);
+                var outerRight = tctx.getImageData(guide.x + guide.width + 2, guide.y, 3, guide.height);
+
+                var innerAvg = avgBrightness(innerData);
+                var outerTopAvg = avgBrightness(outerTop);
+                var outerBottomAvg = avgBrightness(outerBottom);
+                var outerLeftAvg = avgBrightness(outerLeft);
+                var outerRightAvg = avgBrightness(outerRight);
+
+                var diffTop = Math.abs(innerAvg - outerTopAvg);
+                var diffBottom = Math.abs(innerAvg - outerBottomAvg);
+                var diffLeft = Math.abs(innerAvg - outerLeftAvg);
+                var diffRight = Math.abs(innerAvg - outerRightAvg);
+
+                // 检查内部方差（卡片表面相对均匀）
+                var variance = colorVariance(innerData);
+
+                // 四边都有明显差异且内部较为均匀 → 视为合格
+                var threshold = 25;
+                var allSidesDiff = diffTop > threshold && diffBottom > threshold &&
+                                   diffLeft > threshold && diffRight > threshold;
+                var reasonableVariance = variance < 80 && variance > 5;
+                var reasonableBrightness = innerAvg > 50 && innerAvg < 220;
+
+                if (allSidesDiff && reasonableVariance && reasonableBrightness) {
+                    return { compliant: true, corners: null, reason: '' };
+                }
+
+                if (innerAvg < 40) return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
+                if (innerAvg > 235) return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
+                return { compliant: false, corners: null, reason: '请将身份证四角完整放入框内' };
+            } catch (e) {
+                return { compliant: false, corners: null, reason: '检测异常' };
+            }
+        }
+
+        function avgBrightness(imageData) {
+            var data = imageData.data;
+            var sum = 0;
+            var count = data.length / 4;
+            for (var i = 0; i < data.length; i += 4) {
+                sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+            }
+            return sum / count;
+        }
+
+        function colorVariance(imageData) {
+            var data = imageData.data;
+            var sum = 0, sumSq = 0;
+            var count = data.length / 4;
+            for (var i = 0; i < data.length; i += 4) {
+                var v = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                sum += v;
+                sumSq += v * v;
+            }
+            var mean = sum / count;
+            return Math.sqrt(sumSq / count - mean * mean);
+        }
+
+        // ========================
+        // 绘制覆盖层
+        // ========================
+        function drawOverlay() {
+            var ctx = overlayCtx;
+            var w = overlay.width;
+            var h = overlay.height;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // 半透明遮罩（引导框外区域）
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+            ctx.fillRect(0, 0, w, h);
+
+            // 清除引导框区域
+            ctx.clearRect(guide.x, guide.y, guide.width, guide.height);
+
+            var color = detection.compliant ? '#00d97e' : '#ff4d4f';
+
+            // 绘制引导框圆角边框
+            ctx.strokeStyle = color;
+            ctx.lineWidth = Math.max(2, w / 300);
+            drawRoundedRect(ctx, guide.x, guide.y, guide.width, guide.height, 12);
+            ctx.stroke();
+
+            // 绘制四角标记
+            drawCornerMarkers(ctx, guide, color, Math.max(20, w / 40));
+
+            // 绘制检测到的卡片轮廓
+            if (detection.corners && detection.corners.length === 4) {
+                ctx.strokeStyle = 'rgba(0, 217, 126, 0.6)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                ctx.beginPath();
+                ctx.moveTo(detection.corners[0].x, detection.corners[0].y);
+                for (var k = 1; k < 4; k++) {
+                    ctx.lineTo(detection.corners[k].x, detection.corners[k].y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 绘制自动拍照进度条
+            if (consecutiveFrames > 0 && !isCapturing) {
+                var progress = consecutiveFrames / REQUIRED_FRAMES;
+                var barY = guide.y + guide.height + 8;
+                var barH = 4;
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                roundRectPath(ctx, guide.x, barY, guide.width, barH, 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#00d97e';
+                roundRectPath(ctx, guide.x, barY, guide.width * progress, barH, 2);
+                ctx.fill();
+
+                // 进度文字
+                ctx.fillStyle = '#fff';
+                ctx.font = Math.max(12, w / 60) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('正在识别 ' + Math.round(progress * 100) + '%', w / 2, guide.y - 12);
+            } else if (!detection.compliant) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.font = Math.max(12, w / 60) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(currentSide === 'front' ? '请将身份证正面放入框内' : '请将身份证背面放入框内', w / 2, guide.y - 12);
+            }
+        }
+
+        function drawRoundedRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
+
+        function roundRectPath(ctx, x, y, w, h, r) {
+            r = Math.min(r, w / 2, h / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        function drawCornerMarkers(ctx, g, color, size) {
+            var lw = Math.max(3, overlay.width / 200);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lw;
+            ctx.lineCap = 'round';
+
+            // 左上
+            ctx.beginPath();
+            ctx.moveTo(g.x, g.y + size);
+            ctx.lineTo(g.x, g.y);
+            ctx.lineTo(g.x + size, g.y);
+            ctx.stroke();
+
+            // 右上
+            ctx.beginPath();
+            ctx.moveTo(g.x + g.width - size, g.y);
+            ctx.lineTo(g.x + g.width, g.y);
+            ctx.lineTo(g.x + g.width, g.y + size);
+            ctx.stroke();
+
+            // 右下
+            ctx.beginPath();
+            ctx.moveTo(g.x + g.width, g.y + g.height - size);
+            ctx.lineTo(g.x + g.width, g.y + g.height);
+            ctx.lineTo(g.x + g.width - size, g.y + g.height);
+            ctx.stroke();
+
+            // 左下
+            ctx.beginPath();
+            ctx.moveTo(g.x + size, g.y + g.height);
+            ctx.lineTo(g.x, g.y + g.height);
+            ctx.lineTo(g.x, g.y + g.height - size);
+            ctx.stroke();
+        }
+
+        // ========================
+        // 状态文字更新
+        // ========================
+        function updateStatus() {
+            if (isCapturing) return;
+
+            if (detection.compliant) {
+                var pct = Math.round((consecutiveFrames / REQUIRED_FRAMES) * 100);
+                statusText.textContent = '已识别身份证，保持稳定... ' + pct + '%';
+                statusText.className = 'status-bar success';
+            } else {
+                statusText.textContent = detection.reason || '请将身份证放入框内';
+                statusText.className = 'status-bar';
+            }
+        }
+
+        // ========================
+        // 自动拍照
+        // ========================
+        function autoCapture() {
+            if (isCapturing) return;
+            isCapturing = true;
+            capturePhoto();
+        }
+
+        // ========================
+        // 手动拍照
+        // ========================
+        function manualCapture() {
+            if (isCapturing) return;
+            isCapturing = true;
+            capturePhoto();
+        }
+
+        // ========================
+        // 拍照 + 裁剪
+        // ========================
+        function capturePhoto() {
+            // 闪光动画
+            flashEl.classList.add('flash-active');
+            setTimeout(function () { flashEl.classList.remove('flash-active'); }, 150);
+
+            // 震动反馈（移动端）
+            if (navigator.vibrate) navigator.vibrate(100);
+
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+
+            setTimeout(function () {
+                var dataUrl;
+                if (cvReady && detection.corners && detection.corners.length === 4) {
+                    dataUrl = captureWithPerspective();
+                } else {
+                    dataUrl = captureByGuideCrop();
+                }
+
+                if (!dataUrl) {
+                    console.warn('拍照失败，使用引导框裁剪');
+                    dataUrl = captureByGuideCrop();
+                }
+
+                // 保存并进入预览
+                if (currentSide === 'front') {
+                    frontDataUrl = dataUrl;
+                } else {
+                    backDataUrl = dataUrl;
+                }
+
+                stopCamera();
+                showPreview(dataUrl);
+            }, 200);
+        }
+
+        // 透视变换裁剪（仅保存身份证主体）
+        function captureWithPerspective() {
+            var src = null, dst = null, M = null, srcTri = null, dstTri = null;
+            try {
+                src = cv.imread(video);
+
+                // 排序四角点：TL, TR, BR, BL
+                var pts = orderPoints(detection.corners);
+
+                // 计算输出尺寸
+                var widthTop = dist(pts[0], pts[1]);
+                var widthBottom = dist(pts[3], pts[2]);
+                var heightLeft = dist(pts[0], pts[3]);
+                var heightRight = dist(pts[1], pts[2]);
+
+                var outW = Math.round(Math.max(widthTop, widthBottom));
+                var outH = Math.round(Math.max(heightLeft, heightRight));
+
+                // 确保最小尺寸
+                outW = Math.max(outW, 200);
+                outH = Math.max(outH, 126);
+
+                srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                    pts[0].x, pts[0].y,
+                    pts[1].x, pts[1].y,
+                    pts[2].x, pts[2].y,
+                    pts[3].x, pts[3].y
+                ]);
+                dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                    0, 0,
+                    outW, 0,
+                    outW, outH,
+                    0, outH
+                ]);
+
+                M = cv.getPerspectiveTransform(srcTri, dstTri);
+                dst = new cv.Mat();
+                cv.warpPerspective(src, dst, M, new cv.Size(outW, outH),
+                    cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 255));
+
+                // 输出到临时 canvas 再转 dataURL
+                var outCanvas = document.createElement('canvas');
+                outCanvas.width = outW;
+                outCanvas.height = outH;
+                cv.imshow(outCanvas, dst);
+
+                return outCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
+            } catch (e) {
+                console.error('[CV] 透视变换失败:', e);
+                return null;
+            } finally {
+                if (src) src.delete();
+                if (dst) dst.delete();
+                if (M) M.delete();
+                if (srcTri) srcTri.delete();
+                if (dstTri) dstTri.delete();
+            }
+        }
+
+        // 引导框裁剪（降级方案）
+        function captureByGuideCrop() {
+            var tmpCanvas = document.createElement('canvas');
+            tmpCanvas.width = video.videoWidth;
+            tmpCanvas.height = video.videoHeight;
+            var tctx = tmpCanvas.getContext('2d');
+            tctx.drawImage(video, 0, 0);
+
+            var cropCanvas = document.createElement('canvas');
+            cropCanvas.width = guide.width;
+            cropCanvas.height = guide.height;
+            var cctx = cropCanvas.getContext('2d');
+            cctx.drawImage(tmpCanvas, guide.x, guide.y, guide.width, guide.height,
+                          0, 0, guide.width, guide.height);
+
+            return cropCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
+        }
+
+        // 点排序
+        function orderPoints(pts) {
+            var sorted = pts.slice();
+            // 按 x+y 升序：左上最小，右下最大
+            sorted.sort(function (a, b) { return (a.x + a.y) - (b.x + b.y); });
+            var tl = sorted[0];
+            var br = sorted[3];
+            // 剩余两个按 y-x 区分：右上(y-x 最小)，左下(y-x 最大)
+            var mid = [sorted[1], sorted[2]];
+            mid.sort(function (a, b) { return (a.y - a.x) - (b.y - b.x); });
+            var tr = mid[0];
+            var bl = mid[1];
+            return [tl, tr, br, bl];
+        }
+
+        function dist(a, b) {
+            var dx = a.x - b.x;
+            var dy = a.y - b.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // ========================
+        // UI 流程控制
+        // ========================
+        function showCamera(side) {
+            currentSide = side;
+            isCapturing = false;
+            consecutiveFrames = 0;
+
+            // 更新标题
+            cameraTitle.textContent = side === 'front' ? '拍摄身份证 — 正面' : '拍摄身份证 — 背面';
+            statusText.textContent = '请将身份证放入框内';
+            statusText.className = 'status-bar';
+
+            // 更新步骤指示器
+            updateStepIndicator(side === 'front' ? 1 : 2);
+
+            // 切换页面
+            startScreen.style.display = 'none';
+            previewScreen.style.display = 'none';
+            completeScreen.style.display = 'none';
+            cameraScreen.style.display = 'flex';
+
+            startCamera();
+        }
+
+        function showPreview(dataUrl) {
+            previewImage.src = dataUrl;
+            previewTitle.textContent = currentSide === 'front' ? '预览 — 正面' : '预览 — 背面';
+
+            cameraScreen.style.display = 'none';
+            previewScreen.style.display = 'flex';
+        }
+
+        function showComplete() {
+            $('final-front').src = frontDataUrl;
+            $('final-back').src = backDataUrl;
+
+            updateStepIndicator(3);
+
+            previewScreen.style.display = 'none';
+            completeScreen.style.display = 'flex';
+        }
+
+        function updateStepIndicator(step) {
+            var dots = [$('step-1'), $('step-2'), $('step-3')];
+            var bars = [$('bar-1'), $('bar-2')];
+
+            for (var i = 0; i < 3; i++) {
+                dots[i].className = 'step-dot';
+                if (i < step - 1) dots[i].className += ' done';
+                else if (i === step - 1) dots[i].className += ' active';
+            }
+            for (var j = 0; j < 2; j++) {
+                bars[j].className = 'step-bar';
+                if (j < step - 1) bars[j].className += ' done';
+            }
+        }
+
+        // ========================
+        // 事件绑定
+        // ========================
+        $('start-btn').addEventListener('click', function () {
+            showCamera('front');
+        });
+
+        $('manual-btn').addEventListener('click', manualCapture);
+
+        $('retake-btn').addEventListener('click', function () {
+            showCamera(currentSide);
+        });
+
+        $('confirm-btn').addEventListener('click', function () {
+            if (currentSide === 'front') {
+                showCamera('back');
+            } else {
+                showComplete();
+            }
+        });
+
+        $('submit-btn').addEventListener('click', function () {
+            alert('提交成功！\n\n身份证正面和背面已采集完成。');
+            // 实际项目中可在此处上传 frontDataUrl 和 backDataUrl
+            console.log('Front:', frontDataUrl ? frontDataUrl.substring(0, 50) + '...' : 'null');
+            console.log('Back:', backDataUrl ? backDataUrl.substring(0, 50) + '...' : 'null');
+        });
+
+        // ========================
+        // 初始化
+        // ========================
+        checkCv();
+
+    })();
+    </script>
+</body>
+</html>
