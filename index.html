@@ -677,7 +677,7 @@
 
                 cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-                var bestQuad = findBestCardContour(contours, frameArea, src.cols, src.rows, guide);
+                var bestQuad = findBestCardContour(contours, frameArea, src.cols, src.rows, guide, gray);
 
                 // ===== 策略2: 自适应阈值（Canny 失败时，适合白底白卡场景） =====
                 if (!bestQuad) {
@@ -689,7 +689,7 @@
                     contours2 = new cv.MatVector();
                     hierarchy2 = new cv.Mat();
                     cv.findContours(edges2, contours2, hierarchy2, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                    bestQuad = findBestCardContour(contours2, frameArea, src.cols, src.rows, guide);
+                    bestQuad = findBestCardContour(contours2, frameArea, src.cols, src.rows, guide, gray);
                 }
 
                 if (bestQuad) {
@@ -727,15 +727,15 @@
         }
 
         // 在轮廓集合中找到最符合身份证特征的四边形
-        // 关键约束：四角必须在引导框内 + 面积覆盖率达标，排除非身份证物体
-        function findBestCardContour(contours, frameArea, frameW, frameH, guideObj) {
+        // 三重约束：四角严格在引导框内 + 面积覆盖率达标 + 内部有纹理（排除纯色矩形）
+        function findBestCardContour(contours, frameArea, frameW, frameH, guideObj, grayMat) {
             var bestQuad = null;
             var bestArea = 0;
             var guideArea = guideObj.width * guideObj.height;
 
-            // 引导框边界（留 3% 容差，允许微小偏移）
-            var marginX = guideObj.width * 0.03;
-            var marginY = guideObj.height * 0.03;
+            // 引导框边界（6% 内缩，四角必须明显在框内，不允许贴边）
+            var marginX = guideObj.width * 0.06;
+            var marginY = guideObj.height * 0.06;
             var guideLeft = guideObj.x + marginX;
             var guideRight = guideObj.x + guideObj.width - marginX;
             var guideTop = guideObj.y + marginY;
@@ -745,7 +745,7 @@
                 var cnt = contours.get(i);
                 var area = cv.contourArea(cnt);
 
-                // 最小面积：帧面积的 8%，确保卡片足够大
+                // 最小面积：帧面积的 8%
                 if (area < frameArea * 0.08) {
                     cnt.delete();
                     continue;
@@ -753,7 +753,8 @@
 
                 var peri = cv.arcLength(cnt, true);
                 var approx = new cv.Mat();
-                cv.approxPolyDP(cnt, approx, 0.015 * peri, true);
+                // 提高精度：0.008 * peri（原来 0.015），角点更贴合实际卡片边缘
+                cv.approxPolyDP(cnt, approx, 0.008 * peri, true);
 
                 if (approx.rows === 4) {
                     var quad = [];
@@ -764,7 +765,7 @@
                         });
                     }
 
-                    // 【核心约束1】四角必须在引导框内
+                    // 【约束1】四角必须严格在引导框内（6% 内缩）
                     var allInGuide = quad.every(function (p) {
                         return p.x >= guideLeft &&
                                p.x <= guideRight &&
@@ -772,7 +773,7 @@
                                p.y <= guideBottom;
                     });
 
-                    // 宽高比检查（严格接近身份证 1.585）
+                    // 【约束2】宽高比严格接近身份证 1.585
                     var w1 = dist(quad[0], quad[1]);
                     var w2 = dist(quad[3], quad[2]);
                     var h1 = dist(quad[0], quad[3]);
@@ -780,18 +781,24 @@
                     var w = Math.max(w1, w2);
                     var h = Math.max(h1, h2);
                     var aspect = w / h;
-                    var aspectOK = aspect > 1.4 && aspect < 1.8;
+                    var aspectOK = aspect > 1.45 && aspect < 1.75;
 
-                    // 填充率：轮廓面积 / 外接矩形面积，排除不规则形状
+                    // 【约束3】填充率：排除不规则形状
                     var rect = cv.boundingRect(cnt);
                     var fillRatio = area / (rect.width * rect.height);
-                    var fillOK = fillRatio > 0.7;
+                    var fillOK = fillRatio > 0.75;
 
-                    // 【核心约束2】面积覆盖率：卡片必须占引导框 55% 以上
-                    // 防止小物体在框内也被误判为身份证
-                    var coverageOK = area > guideArea * 0.55;
+                    // 【约束4】面积覆盖率：65%~110% 引导框面积
+                    // 太小 = 小物体，太大 = 卡片超出引导框
+                    var coverageOK = area > guideArea * 0.65 && area < guideArea * 1.1;
 
-                    if (allInGuide && aspectOK && fillOK && coverageOK && area > bestArea) {
+                    // 【约束5】内部纹理检测：身份证内部有文字/照片，纯色矩形排除
+                    var textureOK = true;
+                    if (grayMat && allInGuide && aspectOK && fillOK && coverageOK) {
+                        textureOK = checkCardTexture(grayMat, quad);
+                    }
+
+                    if (allInGuide && aspectOK && fillOK && coverageOK && textureOK && area > bestArea) {
                         bestArea = area;
                         bestQuad = { corners: quad, area: area };
                     }
@@ -802,6 +809,43 @@
             }
 
             return bestQuad;
+        }
+
+        // 检测四边形内部是否有足够纹理（文字/照片），排除纯色矩形
+        function checkCardTexture(grayMat, corners) {
+            var roi = null, meanMat = null, stdMat = null;
+            try {
+                var minX = Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x);
+                var maxX = Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x);
+                var minY = Math.min(corners[0].y, corners[1].y, corners[2].y, corners[3].y);
+                var maxY = Math.max(corners[0].y, corners[1].y, corners[2].y, corners[3].y);
+
+                // 取中心 60% 区域采样
+                var cx = Math.round(minX + (maxX - minX) * 0.2);
+                var cy = Math.round(minY + (maxY - minY) * 0.2);
+                var cw = Math.round((maxX - minX) * 0.6);
+                var ch = Math.round((maxY - minY) * 0.6);
+
+                if (cw < 10 || ch < 10) return true; // 太小不检测
+
+                var rect = new cv.Rect(cx, cy, cw, ch);
+                roi = grayMat.roi(rect);
+                meanMat = new cv.Mat();
+                stdMat = new cv.Mat();
+                cv.meanStdDev(roi, meanMat, stdMat);
+
+                var stdDev = stdMat.data64F[0];
+                // 身份证内部有文字/照片 → 标准差 > 18
+                // 纯色矩形（白纸、桌面）→ 标准差通常 < 10
+                return stdDev > 18;
+            } catch (e) {
+                console.warn('[CV] 纹理检测失败:', e);
+                return true; // 检测失败时放行，不阻塞主流程
+            } finally {
+                if (roi) roi.delete();
+                if (meanMat) meanMat.delete();
+                if (stdMat) stdMat.delete();
+            }
         }
 
         // ========================
@@ -1175,8 +1219,8 @@
                 outCanvas.height = outH;
                 cv.imshow(outCanvas, dst);
 
-                // 裁掉边缘 5%（消除检测误差导致的白边/阴影/背景）
-                var trim = 0.05;
+                // 裁掉边缘 8%（彻底消除检测误差/白边/阴影/背景，只保留身份证主体）
+                var trim = 0.08;
                 var trimX = Math.round(outW * trim);
                 var trimY = Math.round(outH * trim);
                 var finalCanvas = document.createElement('canvas');
@@ -1208,8 +1252,8 @@
             var tctx = tmpCanvas.getContext('2d');
             tctx.drawImage(video, 0, 0);
 
-            // 引导框比身份证大，裁掉边缘 6% 收紧到卡片主体
-            var trim = 0.06;
+            // 引导框比身份证大，裁掉边缘 8% 收紧到卡片主体
+            var trim = 0.08;
             var cropX = guide.x + guide.width * trim;
             var cropY = guide.y + guide.height * trim;
             var cropW = guide.width * (1 - 2 * trim);
