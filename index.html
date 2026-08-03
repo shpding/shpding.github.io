@@ -692,7 +692,7 @@
                     bestQuad = findBestCardContour(contours2, guideArea);
                 }
 
-                if (bestQuad && bestQuad.area > guideArea * 0.25) {
+                if (bestQuad && bestQuad.area > guideArea * 0.20) {
                     var mean = cv.mean(gray);
                     var brightness = mean[0];
                     if (brightness < 35) {
@@ -701,6 +701,16 @@
                     if (brightness > 240) {
                         return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
                     }
+
+                    // 检查四个角是否贴近引导框边
+                    var proxResult = checkCornersCloseToGuide(bestQuad.corners);
+                    if (!proxResult.allClose) {
+                        if (proxResult.closeCount >= 2) {
+                            return { compliant: false, corners: bestQuad.corners, reason: '已对齐' + proxResult.closeCount + '个角，请将其余角也贴近框边' };
+                        }
+                        return { compliant: false, corners: bestQuad.corners, reason: '请将身份证四个角都贴近框边' };
+                    }
+
                     return { compliant: true, corners: bestQuad.corners, reason: '' };
                 }
 
@@ -785,6 +795,27 @@
             return bestQuad;
         }
 
+        // 检查检测到的四角是否贴近引导框
+        function checkCornersCloseToGuide(corners) {
+            var ordered = orderPoints(corners);
+            var tolX = guide.width * 0.15;
+            var tolY = guide.height * 0.15;
+
+            var checks = [
+                Math.abs(ordered[0].x - guide.x) < tolX &&
+                Math.abs(ordered[0].y - guide.y) < tolY,
+                Math.abs(ordered[1].x - (guide.x + guide.width)) < tolX &&
+                Math.abs(ordered[1].y - guide.y) < tolY,
+                Math.abs(ordered[2].x - (guide.x + guide.width)) < tolX &&
+                Math.abs(ordered[2].y - (guide.y + guide.height)) < tolY,
+                Math.abs(ordered[3].x - guide.x) < tolX &&
+                Math.abs(ordered[3].y - (guide.y + guide.height)) < tolY
+            ];
+
+            var closeCount = checks.filter(function (v) { return v; }).length;
+            return { allClose: closeCount === 4, closeCount: closeCount };
+        }
+
         // ========================
         // 降级检测（无 OpenCV.js）
         // ========================
@@ -853,6 +884,33 @@
                                       innerVar > outerBottomVar * 1.3);
 
                 if ((hasBrightnessDiff || hasTextureDiff) && innerVar > 5 && innerAvg > 40 && innerAvg < 230) {
+                    // 填充率检查：采样引导框边缘附近的条带，确认卡片延伸到边缘
+                    var edgeMargin = Math.max(3, Math.round(gw * 0.06));
+                    var stripW = Math.max(2, Math.round(gw * 0.04));
+                    var topStrip = tctx.getImageData(gx + edgeMargin, gy + edgeMargin, gw - 2 * edgeMargin, stripW);
+                    var botStrip = tctx.getImageData(gx + edgeMargin, gy + gh - edgeMargin - stripW, gw - 2 * edgeMargin, stripW);
+                    var leftStrip = tctx.getImageData(gx + edgeMargin, gy + edgeMargin, stripW, gh - 2 * edgeMargin);
+                    var rightStrip = tctx.getImageData(gx + gw - edgeMargin - stripW, gy + edgeMargin, stripW, gh - 2 * edgeMargin);
+
+                    var topAvg2 = avgBrightness(topStrip);
+                    var botAvg2 = avgBrightness(botStrip);
+                    var leftAvg2 = avgBrightness(leftStrip);
+                    var rightAvg2 = avgBrightness(rightStrip);
+
+                    var cw2 = Math.round(gw * 0.3);
+                    var ch2 = Math.round(gh * 0.3);
+                    var centerData = tctx.getImageData(gx + (gw - cw2) / 2, gy + (gh - ch2) / 2, cw2, ch2);
+                    var centerAvg = avgBrightness(centerData);
+
+                    var fillTol = 22;
+                    var fillOK = Math.abs(topAvg2 - centerAvg) < fillTol &&
+                                 Math.abs(botAvg2 - centerAvg) < fillTol &&
+                                 Math.abs(leftAvg2 - centerAvg) < fillTol &&
+                                 Math.abs(rightAvg2 - centerAvg) < fillTol;
+
+                    if (!fillOK) {
+                        return { compliant: false, corners: null, reason: '请将身份证放大，四角贴近框边' };
+                    }
                     return { compliant: true, corners: null, reason: '' };
                 }
 
@@ -916,7 +974,7 @@
 
             // 绘制检测到的卡片轮廓
             if (detection.corners && detection.corners.length === 4) {
-                ctx.strokeStyle = 'rgba(0, 217, 126, 0.6)';
+                ctx.strokeStyle = detection.compliant ? 'rgba(0, 217, 126, 0.6)' : 'rgba(250, 173, 20, 0.7)';
                 ctx.lineWidth = 2;
                 ctx.setLineDash([8, 4]);
                 ctx.beginPath();
@@ -1068,7 +1126,7 @@
 
             setTimeout(function () {
                 var dataUrl;
-                if (cvReady && detection.corners && detection.corners.length === 4) {
+                if (cvReady && detection.compliant && detection.corners && detection.corners.length === 4) {
                     dataUrl = captureWithPerspective();
                 } else {
                     dataUrl = captureByGuideCrop();
