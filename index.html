@@ -2,9 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>身份证信息采集</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>身份证采集</title>
     <style>
+        :root {
+            --frame-color: rgba(0, 200, 100, 0.7);
+            --frame-color-active: rgba(0, 255, 80, 0.9);
+            --frame-color-warning: rgba(255, 180, 0, 0.8);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,33 +18,191 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-            background: #f0f2f5;
-            color: #1a1a1a;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #000;
+            overflow: hidden;
+            height: 100dvh;
+            width: 100vw;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
-        /* ===== Loading ===== */
-        .loading-screen {
-            position: fixed;
-            inset: 0;
-            background: #fff;
+        /* ========== 摄像头区域 ========== */
+        .scanner-container {
+            position: relative;
+            width: 100%;
+            height: 100dvh;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #videoElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* 镜像，更方便对齐 */
+        }
+
+        /* ========== 参考框叠加层 ========== */
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .reference-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            /* 默认尺寸，JS中动态计算 */
+            border: 2.5px solid var(--frame-color);
+            border-radius: 6px;
+            box-shadow:
+                0 0 0 9999px rgba(0, 0, 0, 0.55),
+                inset 0 0 30px rgba(0, 200, 100, 0.08);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .reference-frame.detected {
+            border-color: var(--frame-color-active);
+            box-shadow:
+                0 0 0 9999px rgba(0, 0, 0, 0.55),
+                inset 0 0 30px rgba(0, 255, 80, 0.12),
+                0 0 20px rgba(0, 255, 80, 0.15);
+        }
+
+        .reference-frame.capturing {
+            border-color: #fff;
+            box-shadow:
+                0 0 0 9999px rgba(0, 0, 0, 0.7),
+                0 0 40px rgba(255, 255, 255, 0.3);
+        }
+
+        /* 四角标记 */
+        .corner {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            border-color: var(--frame-color);
+            border-style: solid;
+            transition: all 0.3s ease;
+        }
+        .corner-tl { top: -3px; left: -3px; border-width: 4px 0 0 4px; border-radius: 4px 0 0 0; }
+        .corner-tr { top: -3px; right: -3px; border-width: 4px 4px 0 0; border-radius: 0 4px 0 0; }
+        .corner-bl { bottom: -3px; left: -3px; border-width: 0 0 4px 4px; border-radius: 0 0 0 4px; }
+        .corner-br { bottom: -3px; right: -3px; border-width: 0 4px 4px 0; border-radius: 0 0 4px 0; }
+
+        .detected .corner {
+            border-color: var(--frame-color-active);
+            width: 34px;
+            height: 34px;
+        }
+
+        /* ========== 状态提示 ========== */
+        .status-bar {
+            position: absolute;
+            bottom: 12%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            padding: 10px 24px;
+            border-radius: 24px;
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: #fff;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+            text-align: center;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        .status-bar.capturing {
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            font-size: 16px;
+            animation: pulse-text 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse-text {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .tilt-indicator {
+            position: absolute;
+            top: 8%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            padding: 6px 16px;
+            border-radius: 14px;
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            color: #aaa;
+            font-size: 13px;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+
+        .tilt-indicator.good {
+            color: #4cff88;
+        }
+        .tilt-indicator.warn {
+            color: #ffb400;
+        }
+
+        /* ========== 检测点可视化Canvas ========== */
+        #debugCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 15;
+            transform: scaleX(-1);
+        }
+
+        /* ========== 加载遮罩 ========== */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            z-index: 100;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            z-index: 999;
+            color: #fff;
+            transition: opacity 0.4s ease;
+        }
+
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
         }
 
         .spinner {
             width: 40px;
             height: 40px;
-            border: 3px solid #e0e0e0;
-            border-top-color: #1677ff;
+            border: 3px solid rgba(255,255,255,0.2);
+            border-top-color: #4cff88;
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
             margin-bottom: 16px;
@@ -49,1294 +213,888 @@
         }
 
         .loading-text {
-            color: #666;
-            font-size: 14px;
+            font-size: 15px;
+            color: #aaa;
         }
 
-        /* ===== Screens ===== */
-        .screen {
+        /* ========== 结果展示 ========== */
+        .result-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
-            max-width: 600px;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.92);
+            z-index: 200;
             display: flex;
             flex-direction: column;
             align-items: center;
-        }
-
-        /* ===== Start Screen ===== */
-        .start-card {
-            background: #fff;
-            border-radius: 16px;
-            padding: 40px 24px;
-            width: 100%;
-            text-align: center;
-            margin-top: 60px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-        }
-
-        .start-card h1 {
-            font-size: 24px;
-            margin-bottom: 24px;
-            color: #1a1a1a;
-        }
-
-        .start-card .icon-wrap {
-            width: 72px;
-            height: 72px;
-            margin: 0 auto 20px;
-            background: #e6f0ff;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
             justify-content: center;
-            font-size: 32px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s ease;
         }
 
-        .tips {
-            text-align: left;
-            background: #f6f8fa;
-            border-radius: 10px;
-            padding: 16px;
-            margin-bottom: 24px;
+        .result-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
         }
 
-        .tips p {
-            font-size: 14px;
-            color: #555;
-            line-height: 2;
-        }
-
-        /* ===== Buttons ===== */
-        .btn-primary {
-            background: #1677ff;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            padding: 14px 32px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            width: 100%;
-        }
-
-        .btn-primary:hover {
-            background: #0958d9;
-        }
-
-        .btn-primary:active {
-            transform: scale(0.98);
-        }
-
-        .btn-secondary {
+        .result-card {
             background: #fff;
-            color: #1677ff;
-            border: 1.5px solid #1677ff;
-            border-radius: 10px;
-            padding: 14px 32px;
-            font-size: 16px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            width: 100%;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 90vw;
+            max-height: 82vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
         }
 
-        .btn-secondary:active {
-            transform: scale(0.98);
+        .result-card h3 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+
+        .result-image-wrapper {
+            position: relative;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            margin-bottom: 20px;
+            max-width: 100%;
+            max-height: 55vh;
+            /* 棋盘格背景，展示透明/白色边缘 */
+            background-image:
+                linear-gradient(45deg, #e0e0e0 25%, transparent 25%),
+                linear-gradient(-45deg, #e0e0e0 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #e0e0e0 75%),
+                linear-gradient(-45deg, transparent 75%, #e0e0e0 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+            background-color: #f5f5f5;
+        }
+
+        .result-image-wrapper img {
+            display: block;
+            max-width: 100%;
+            max-height: 55vh;
+            object-fit: contain;
+        }
+
+        .result-info {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 20px;
+            text-align: center;
         }
 
         .btn-group {
             display: flex;
             gap: 12px;
-            width: 100%;
-        }
-
-        /* ===== Camera Screen ===== */
-        .camera-header {
-            width: 100%;
-            text-align: center;
-            margin-bottom: 16px;
-        }
-
-        .camera-header h2 {
-            font-size: 18px;
-            color: #1a1a1a;
-            margin-bottom: 12px;
-        }
-
-        .step-indicator {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-
-        .step-dot {
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 13px;
-            font-weight: 600;
-            background: #e0e0e0;
-            color: #999;
-            transition: all 0.3s;
-        }
-
-        .step-dot.active {
-            background: #1677ff;
-            color: #fff;
-        }
-
-        .step-dot.done {
-            background: #52c41a;
-            color: #fff;
-        }
-
-        .step-bar {
-            width: 40px;
-            height: 2px;
-            background: #e0e0e0;
-        }
-
-        .step-bar.done {
-            background: #52c41a;
-        }
-
-        .camera-wrap {
-            position: relative;
-            width: 100%;
-            background: #000;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-        }
-
-        .camera-wrap video {
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: fill;
-            display: block;
-        }
-
-        .camera-wrap canvas {
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-        }
-
-        .flash-overlay {
-            position: absolute;
-            inset: 0;
-            background: #fff;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.15s ease-out;
-        }
-
-        .flash-overlay.flash-active {
-            opacity: 0.9;
-            transition: none;
-        }
-
-        .status-bar {
-            width: 100%;
-            text-align: center;
-            padding: 16px;
-            font-size: 15px;
-            color: #666;
-            min-height: 52px;
-            display: flex;
-            align-items: center;
+            flex-wrap: wrap;
             justify-content: center;
         }
 
-        .status-bar.success { color: #52c41a; font-weight: 500; }
-        .status-bar.warning { color: #faad14; }
-        .status-bar.error { color: #ff4d4f; }
-
-        .camera-actions {
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            margin-top: 8px;
-        }
-
-        .btn-capture {
-            background: #fff;
-            color: #1677ff;
-            border: 1.5px solid #1677ff;
-            border-radius: 10px;
+        .btn {
             padding: 12px 28px;
+            border: none;
+            border-radius: 24px;
             font-size: 15px;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
+            letter-spacing: 0.5px;
+            transition: all 0.2s ease;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
-        .btn-capture:active { transform: scale(0.98); }
+        .btn:active {
+            transform: scale(0.96);
+        }
 
-        /* ===== Preview Screen ===== */
-        .preview-header {
+        .btn-primary {
+            background: #4cff88;
+            color: #111;
+        }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+            border: 1.5px solid rgba(255,255,255,0.3);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.25);
+        }
+
+        /* ========== 权限按钮 ========== */
+        .permission-prompt {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 50;
             text-align: center;
-            margin-bottom: 16px;
+            color: #fff;
         }
 
-        .preview-header h2 {
-            font-size: 18px;
-            margin-bottom: 4px;
+        .permission-prompt .btn {
+            margin-top: 16px;
         }
 
-        .preview-header p {
-            font-size: 13px;
-            color: #999;
-        }
-
-        .preview-image-wrap {
-            background: #fff;
-            border-radius: 16px;
-            padding: 16px;
-            width: 100%;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-            margin-bottom: 16px;
-        }
-
-        .preview-image-wrap img {
-            width: 100%;
+        /* ========== 错误状态 ========== */
+        .error-toast {
+            position: absolute;
+            top: 6%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 300;
+            padding: 10px 20px;
             border-radius: 8px;
-            display: block;
-        }
-
-        .preview-actions {
-            width: 100%;
-            display: flex;
-            gap: 12px;
-        }
-
-        /* ===== Complete Screen ===== */
-        .complete-header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .complete-header .success-icon {
-            width: 56px;
-            height: 56px;
-            background: #f6ffed;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 12px;
-            font-size: 28px;
-        }
-
-        .complete-header h2 {
-            font-size: 20px;
-            margin-bottom: 4px;
-        }
-
-        .complete-header p {
+            background: rgba(255, 60, 60, 0.9);
+            color: #fff;
             font-size: 14px;
-            color: #999;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
 
-        .complete-images {
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .complete-image-item {
-            background: #fff;
-            border-radius: 12px;
-            padding: 12px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-        }
-
-        .complete-image-item label {
-            display: block;
-            font-size: 13px;
-            color: #666;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-
-        .complete-image-item img {
-            width: 100%;
-            border-radius: 6px;
-            display: block;
-        }
-
-        /* ===== Responsive ===== */
-        @media (max-width: 480px) {
-            body { padding: 12px; }
-            .start-card { padding: 32px 20px; margin-top: 40px; }
-            .camera-header h2 { font-size: 16px; }
-            .tips p { font-size: 13px; }
+        .error-toast.show {
+            opacity: 1;
         }
     </style>
 </head>
 <body>
+    <div class="scanner-container" id="scannerContainer">
+        <!-- 摄像头画面 -->
+        <video id="videoElement" playsinline autoplay muted></video>
 
-    <!-- 加载页 -->
-    <div id="loading-screen" class="loading-screen">
-        <div class="spinner"></div>
-        <p class="loading-text" id="loading-text">正在加载识别组件...</p>
-    </div>
+        <!-- 检测点可视化 -->
+        <canvas id="debugCanvas"></canvas>
 
-    <!-- 开始页 -->
-    <div id="start-screen" class="screen" style="display:none">
-        <div class="start-card">
-            <div class="icon-wrap">🪪</div>
-            <h1>身份证信息采集</h1>
-            <div class="tips">
-                <p>📋 请准备身份证原件（正面 + 背面）</p>
-                <p>💡 请在光线充足、无反光的环境下操作</p>
-                <p>📷 将身份证放入引导框，<b>四个角必须在框内</b></p>
-                <p>✅ 对齐后自动拍照，仅裁剪身份证主体内容</p>
-            </div>
-            <button id="start-btn" class="btn-primary">开始采集</button>
-        </div>
-    </div>
-
-    <!-- 拍照页 -->
-    <div id="camera-screen" class="screen" style="display:none">
-        <div class="camera-header">
-            <h2 id="camera-title">拍摄身份证 — 正面</h2>
-            <div class="step-indicator">
-                <span class="step-dot active" id="step-1">1</span>
-                <span class="step-bar" id="bar-1"></span>
-                <span class="step-dot" id="step-2">2</span>
-                <span class="step-bar" id="bar-2"></span>
-                <span class="step-dot" id="step-3">3</span>
+        <!-- 参考框叠加层 -->
+        <div class="overlay" id="overlay">
+            <div class="reference-frame" id="referenceFrame">
+                <div class="corner corner-tl"></div>
+                <div class="corner corner-tr"></div>
+                <div class="corner corner-bl"></div>
+                <div class="corner corner-br"></div>
             </div>
         </div>
-        <div class="camera-wrap" id="camera-wrap">
-            <video id="video" autoplay playsinline muted></video>
-            <canvas id="overlay"></canvas>
-            <div class="flash-overlay" id="flash-overlay"></div>
+
+        <!-- 状态提示 -->
+        <div class="tilt-indicator" id="tiltIndicator">请将身份证对准框内</div>
+        <div class="status-bar" id="statusBar">保持稳定，自动识别中…</div>
+
+        <!-- 加载遮罩 -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loadingText">正在加载识别引擎…</div>
         </div>
-        <div class="status-bar" id="status-text">请将身份证四角对齐引导框</div>
-        <div class="camera-actions">
-            <button id="manual-btn" class="btn-capture">手动拍照</button>
+
+        <!-- 错误提示 -->
+        <div class="error-toast" id="errorToast"></div>
+
+        <!-- 结果展示 -->
+        <div class="result-overlay" id="resultOverlay">
+            <div class="result-card">
+                <h3>✓ 采集完成</h3>
+                <div class="result-image-wrapper">
+                    <img id="resultImage" alt="身份证采集结果" />
+                </div>
+                <div class="result-info" id="resultInfo"></div>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="btnDownload">下载图片</button>
+                    <button class="btn btn-primary" id="btnCopy" style="background:#5b9aff;color:#fff;">复制到剪贴板</button>
+                    <button class="btn btn-secondary" id="btnRetake">重新拍摄</button>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- 预览页 -->
-    <div id="preview-screen" class="screen" style="display:none">
-        <div class="preview-header">
-            <h2 id="preview-title">预览 — 正面</h2>
-            <p>请确认身份证信息清晰完整</p>
-        </div>
-        <div class="preview-image-wrap">
-            <img id="preview-image" alt="预览图">
-        </div>
-        <div class="preview-actions">
-            <button id="retake-btn" class="btn-secondary">重新拍摄</button>
-            <button id="confirm-btn" class="btn-primary">确认使用</button>
-        </div>
-    </div>
-
-    <!-- 完成页 -->
-    <div id="complete-screen" class="screen" style="display:none">
-        <div class="complete-header">
-            <div class="success-icon">✅</div>
-            <h2>采集完成</h2>
-            <p>请确认以下身份证信息</p>
-        </div>
-        <div class="complete-images">
-            <div class="complete-image-item">
-                <label>身份证正面</label>
-                <img id="final-front" alt="正面">
-            </div>
-            <div class="complete-image-item">
-                <label>身份证背面</label>
-                <img id="final-back" alt="背面">
-            </div>
-        </div>
-        <button id="submit-btn" class="btn-primary">提交信息</button>
-    </div>
+    <!-- 隐藏的处理Canvas -->
+    <canvas id="processCanvas" style="display:none;"></canvas>
 
     <!-- OpenCV.js -->
-    <script async src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+    <script async src="https://docs.opencv.org/4.8.0/opencv.js" id="opencvScript"></script>
+
     <script>
-    (function () {
-        'use strict';
+    (function() {
+        // ==================== DOM 引用 ====================
+        const videoEl = document.getElementById('videoElement');
+        const debugCanvas = document.getElementById('debugCanvas');
+        const debugCtx = debugCanvas.getContext('2d');
+        const processCanvas = document.getElementById('processCanvas');
+        const processCtx = processCanvas.getContext('2d', { willReadFrequently: true });
+        const referenceFrame = document.getElementById('referenceFrame');
+        const statusBar = document.getElementById('statusBar');
+        const tiltIndicator = document.getElementById('tiltIndicator');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        const errorToast = document.getElementById('errorToast');
+        const resultOverlay = document.getElementById('resultOverlay');
+        const resultImage = document.getElementById('resultImage');
+        const resultInfo = document.getElementById('resultInfo');
+        const scannerContainer = document.getElementById('scannerContainer');
 
-        // ========================
-        // 配置常量
-        // ========================
-        var CARD_ASPECT = 1.585;          // 身份证宽高比 (85.6mm / 54mm)
-        var REQUIRED_FRAMES = 12;         // 连续合格帧数触发自动拍照 (约1.2s)
-        var DETECT_INTERVAL = 100;        // 检测间隔 ms
-        var GUIDE_WIDTH_RATIO = 0.88;     // 引导框宽度占视频宽度比例（收紧，减少白边）
-        var JPEG_QUALITY = 0.92;
+        // ==================== 常量 ====================
+        const ID_CARD_RATIO = 1.586; // 身份证宽高比 85.6/54
+        const MAX_TILT_DEGREES = 5;   // 最大允许倾斜角度
+        const PROCESS_INTERVAL_MS = 120; // 检测间隔
+        const STABLE_FRAMES_REQUIRED = 4; // 需要连续稳定帧数才触发拍照
+        const CAPTURE_DELAY_MS = 600;  // 拍照前的稳定等待
 
-        // ========================
-        // DOM 元素
-        // ========================
-        var $ = function (id) { return document.getElementById(id); };
-        var loadingScreen = $('loading-screen');
-        var loadingText = $('loading-text');
-        var startScreen = $('start-screen');
-        var cameraScreen = $('camera-screen');
-        var previewScreen = $('preview-screen');
-        var completeScreen = $('complete-screen');
-        var video = $('video');
-        var overlay = $('overlay');
-        var overlayCtx = overlay.getContext('2d');
-        var flashEl = $('flash-overlay');
-        var statusText = $('status-text');
-        var cameraWrap = $('camera-wrap');
-        var cameraTitle = $('camera-title');
-        var previewTitle = $('preview-title');
-        var previewImage = $('preview-image');
+        // ==================== 状态管理 ====================
+        let cvReady = false;
+        let cameraReady = false;
+        let isProcessing = false;
+        let isCapturing = false;
+        let animationFrameId = null;
+        let lastProcessTime = 0;
+        let stableFrameCount = 0;
+        let captureTimeoutId = null;
+        let videoWidth = 0;
+        let videoHeight = 0;
+        let refFrameWidth = 0;
+        let refFrameHeight = 0;
+        let refFrameLeft = 0;
+        let refFrameTop = 0;
 
-        // ========================
-        // 状态
-        // ========================
-        var cvReady = false;
-        var cvFallback = false;
-        var stream = null;
-        var guide = { x: 0, y: 0, width: 0, height: 0 };
-        var detection = { compliant: false, corners: null, reason: '' };
-        var consecutiveFrames = 0;
-        var currentSide = 'front'; // 'front' | 'back'
-        var frontDataUrl = null;
-        var backDataUrl = null;
-        var isCapturing = false;
-        var rafId = null;
-        var lastDetectTime = 0;
+        // ==================== Toast ====================
+        let toastTimer;
+        function showToast(msg, duration = 2500) {
+            clearTimeout(toastTimer);
+            errorToast.textContent = msg;
+            errorToast.classList.add('show');
+            toastTimer = setTimeout(() => errorToast.classList.remove('show'), duration);
+        }
 
-        // ========================
-        // OpenCV.js 加载检测
-        // ========================
-        function checkCv() {
-            if (window.cv && cv.Mat) {
+        // ==================== 参考框计算 ====================
+        function updateReferenceFrame() {
+            videoWidth = videoEl.videoWidth || 1280;
+            videoHeight = videoEl.videoHeight || 720;
+
+            // 参考框高度占视频高度的 60%
+            refFrameHeight = Math.round(videoHeight * 0.60);
+            refFrameWidth = Math.round(refFrameHeight * ID_CARD_RATIO);
+
+            // 确保参考框不超出视频边界
+            const maxWidth = videoWidth * 0.90;
+            if (refFrameWidth > maxWidth) {
+                refFrameWidth = Math.round(maxWidth);
+                refFrameHeight = Math.round(refFrameWidth / ID_CARD_RATIO);
+            }
+
+            refFrameLeft = Math.round((videoWidth - refFrameWidth) / 2);
+            refFrameTop = Math.round((videoHeight - refFrameHeight) / 2);
+
+            // 更新CSS中参考框的显示尺寸（相对于屏幕）
+            const containerWidth = scannerContainer.clientWidth;
+            const containerHeight = scannerContainer.clientHeight;
+            const scaleX = containerWidth / videoWidth;
+            const scaleY = containerHeight / videoHeight;
+
+            referenceFrame.style.width = (refFrameWidth * scaleX) + 'px';
+            referenceFrame.style.height = (refFrameHeight * scaleY) + 'px';
+        }
+
+        // ==================== OpenCV 初始化 ====================
+        function initOpenCV() {
+            if (typeof cv !== 'undefined' && cv.Mat) {
                 cvReady = true;
-                console.log('[CV] OpenCV.js 已就绪');
-                enterStartScreen();
-            } else {
-                setTimeout(checkCv, 300);
+                loadingText.textContent = '引擎就绪，启动摄像头…';
+                initCamera();
+                return;
             }
+            // 轮询等待 OpenCV.js 加载
+            setTimeout(() => {
+                if (typeof cv !== 'undefined' && cv.Mat) {
+                    cvReady = true;
+                    loadingText.textContent = '引擎就绪，启动摄像头…';
+                    initCamera();
+                } else {
+                    initOpenCV();
+                }
+            }, 300);
         }
 
-        // 15秒超时降级
-        setTimeout(function () {
-            if (!cvReady) {
-                cvFallback = true;
-                console.warn('[CV] OpenCV.js 加载超时，降级为基础检测模式');
-                enterStartScreen();
-            }
-        }, 15000);
+        // OpenCV.js 加载完成回调
+        window.onOpenCvReady = function() {
+            // 由轮询检测
+        };
 
-        function enterStartScreen() {
-            loadingScreen.style.display = 'none';
-            startScreen.style.display = 'flex';
-        }
-
-        // ========================
-        // 摄像头初始化
-        // ========================
-        async function startCamera() {
+        // ==================== 摄像头初始化 ====================
+        async function initCamera() {
             try {
-                stream = await navigator.mediaDevices.getUserMedia({
+                const constraints = {
                     video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
+                        facingMode: 'environment',
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
                     },
                     audio: false
-                });
-                video.srcObject = stream;
-                await new Promise(function (resolve) {
-                    video.onloadedmetadata = resolve;
-                });
-                await video.play();
-
-                // 设置 canvas 尺寸 = 视频原始分辨率
-                overlay.width = video.videoWidth;
-                overlay.height = video.videoHeight;
-
-                // 设置容器宽高比与视频一致
-                cameraWrap.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
-
-                // 计算引导框
-                var gw = overlay.width * GUIDE_WIDTH_RATIO;
-                var gh = gw / CARD_ASPECT;
-                // 如果高度超出视频，以高度为基准
-                if (gh > overlay.height * 0.7) {
-                    gh = overlay.height * 0.7;
-                    gw = gh * CARD_ASPECT;
-                }
-                guide = {
-                    x: (overlay.width - gw) / 2,
-                    y: (overlay.height - gh) / 2,
-                    width: gw,
-                    height: gh
                 };
 
-                console.log('[Camera] 视频尺寸:', video.videoWidth, 'x', video.videoHeight);
-                console.log('[Guide]', JSON.stringify(guide));
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoEl.srcObject = stream;
 
-                startDetectionLoop();
+                videoEl.onloadedmetadata = () => {
+                    videoEl.play();
+                    cameraReady = true;
+                    updateReferenceFrame();
+                    setupCanvasSizes();
+                    loadingOverlay.classList.add('hidden');
+                    startProcessingLoop();
+                    statusBar.textContent = '请将身份证放入框内';
+                };
             } catch (err) {
-                console.error('[Camera] 摄像头启动失败:', err);
-                statusText.textContent = '无法访问摄像头，请检查权限设置';
-                statusText.className = 'status-bar error';
+                console.error('摄像头访问失败:', err);
+                loadingText.textContent = '摄像头访问失败';
+                if (err.name === 'NotAllowedError') {
+                    showToast('请在浏览器设置中允许摄像头权限');
+                } else if (err.name === 'NotFoundError') {
+                    showToast('未检测到摄像头设备');
+                } else {
+                    showToast('摄像头启动失败: ' + err.message);
+                }
             }
         }
 
-        function stopCamera() {
-            if (rafId) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
+        function setupCanvasSizes() {
+            videoWidth = videoEl.videoWidth;
+            videoHeight = videoEl.videoHeight;
+
+            debugCanvas.width = videoWidth;
+            debugCanvas.height = videoHeight;
+            processCanvas.width = videoWidth;
+            processCanvas.height = videoHeight;
+        }
+
+        // ==================== 图像处理核心 ====================
+        function imageDataToMat(imageData) {
+            const mat = new cv.Mat(imageData.height, imageData.width, cv.CV_8UC4);
+            mat.data.set(new Uint8Array(imageData.data));
+            return mat;
+        }
+
+        function matToImageData(mat) {
+            const canvas = document.createElement('canvas');
+            canvas.width = mat.cols;
+            canvas.height = mat.rows;
+            cv.imshow(canvas, mat);
+            return canvas.getContext('2d').getImageData(0, 0, mat.cols, mat.rows);
+        }
+
+        /**
+         * 对检测到的四个角点排序：左上、右上、右下、左下
+         */
+        function orderCorners(pts) {
+            const rect = pts.map(p => ({ x: p.x, y: p.y }));
+
+            // 按 x+y 排序，最小的是左上，最大的是右下
+            rect.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+            const tl = rect[0];
+            const br = rect[3];
+
+            // 中间两个：按 x 区分，x 大的是右上，x 小的是左下
+            const mid = [rect[1], rect[2]];
+            mid.sort((a, b) => a.x - b.x);
+
+            // 验证：x 小的如果 y 更大，说明排序反了
+            if (mid[0].y > mid[1].y) {
+                return [tl, mid[1], br, mid[0]]; // tl, tr, br, bl
             }
-            if (stream) {
-                stream.getTracks().forEach(function (t) { t.stop(); });
-                stream = null;
+            return [tl, mid[0], br, mid[1]]; // tl, tr, br, bl
+        }
+
+        /**
+         * 计算四边形的宽高比
+         */
+        function calculateAspectRatio(corners) {
+            const topW = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+            const bottomW = Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y);
+            const leftH = Math.hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y);
+            const rightH = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
+
+            const avgW = (topW + bottomW) / 2;
+            const avgH = (leftH + rightH) / 2;
+
+            if (avgH === 0) return 0;
+            return avgW / avgH;
+        }
+
+        /**
+         * 计算四边形各边的倾斜角度
+         * 返回最大偏差角度（度）
+         */
+        function calculateTilt(corners) {
+            // corners: [tl, tr, br, bl]
+            const topAngle = Math.atan2(corners[1].y - corners[0].y, corners[1].x - corners[0].x);
+            const bottomAngle = Math.atan2(corners[2].y - corners[3].y, corners[2].x - corners[3].x);
+            const leftAngle = Math.atan2(corners[3].y - corners[0].y, corners[3].x - corners[0].x);
+            const rightAngle = Math.atan2(corners[2].y - corners[1].y, corners[2].x - corners[1].x);
+
+            // 转为度，并计算与期望角度的偏差
+            const topDeg = topAngle * 180 / Math.PI;
+            const bottomDeg = bottomAngle * 180 / Math.PI;
+            const leftDeg = leftAngle * 180 / Math.PI;
+            const rightDeg = rightAngle * 180 / Math.PI;
+
+            // 上下边期望接近 0°（水平），左右边期望接近 ±90°（垂直）
+            const topDev = Math.abs(topDeg);
+            const bottomDev = Math.abs(bottomDeg);
+            const leftDev = Math.abs(90 - Math.abs(leftDeg));
+            const rightDev = Math.abs(90 - Math.abs(rightDeg));
+
+            return Math.max(topDev, bottomDev, leftDev, rightDev);
+        }
+
+        /**
+         * 检查角点是否在参考框内（含一定容差）
+         */
+        function isInReferenceFrame(corners) {
+            const margin = refFrameWidth * 0.08; // 8% 容差
+            const frameLeft = refFrameLeft - margin;
+            const frameTop = refFrameTop - margin;
+            const frameRight = refFrameLeft + refFrameWidth + margin;
+            const frameBottom = refFrameTop + refFrameHeight + margin;
+
+            return corners.every(c =>
+                c.x >= frameLeft && c.x <= frameRight &&
+                c.y >= frameTop && c.y <= frameBottom
+            );
+        }
+
+        /**
+         * 主检测函数：从视频帧中检测身份证角点
+         */
+        function detectIDCardCorners(srcMat) {
+            const gray = new cv.Mat();
+            const blurred = new cv.Mat();
+            const edges = new cv.Mat();
+            const dilated = new cv.Mat();
+            const contours = new cv.MatVector();
+            const hierarchy = new cv.Mat();
+
+            try {
+                // 1. 灰度化
+                cv.cvtColor(srcMat, gray, cv.COLOR_RGBA2GRAY);
+
+                // 2. 高斯模糊降噪
+                cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+
+                // 3. Canny边缘检测（自适应阈值）
+                const medianVal = gray.data[Math.floor(gray.data.length / 2)] || 100;
+                const lower = Math.max(0, Math.floor(medianVal * 0.5));
+                const upper = Math.min(255, Math.floor(medianVal * 1.5));
+                cv.Canny(blurred, edges, Math.max(lower, 30), Math.max(upper, 90));
+
+                // 4. 膨胀连接断边
+                cv.dilate(edges, dilated, cv.Mat.ones(2, 2, cv.CV_8U));
+
+                // 5. 查找轮廓
+                cv.findContours(dilated, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+                let bestQuad = null;
+                let maxArea = 0;
+                const minArea = (videoWidth * videoHeight) * 0.03; // 最小面积阈值
+
+                for (let i = 0; i < contours.size(); i++) {
+                    const contour = contours.get(i);
+                    const peri = cv.arcLength(contour, true);
+                    const approx = new cv.Mat();
+                    cv.approxPolyDP(contour, approx, 0.025 * peri, true);
+
+                    if (approx.rows === 4) {
+                        const area = cv.contourArea(approx);
+                        if (area > minArea && area > maxArea) {
+                            // 提取四个角点
+                            const pts = [];
+                            for (let j = 0; j < 4; j++) {
+                                pts.push({
+                                    x: approx.data32S[j * 2],
+                                    y: approx.data32S[j * 2 + 1]
+                                });
+                            }
+                            const ordered = orderCorners(pts);
+                            const ar = calculateAspectRatio(ordered);
+
+                            // 检查宽高比是否接近身份证比例 (±30% 容差)
+                            if (Math.abs(ar - ID_CARD_RATIO) < 0.50) {
+                                maxArea = area;
+                                bestQuad = ordered;
+                            }
+                        }
+                    }
+                    approx.delete();
+                }
+
+                return bestQuad;
+            } finally {
+                gray.delete();
+                blurred.delete();
+                edges.delete();
+                dilated.delete();
+                contours.delete();
+                hierarchy.delete();
             }
         }
 
-        // ========================
-        // 检测主循环
-        // ========================
-        function startDetectionLoop() {
-            consecutiveFrames = 0;
+        /**
+         * 透视变换 + 零边距裁剪
+         * 直接按身份证四边像素边界裁剪，不留任何留白
+         */
+        function performPerspectiveTransform(srcMat, corners) {
+            // 计算输出尺寸：基于源点实际像素宽度
+            const topWidth = Math.hypot(corners[1].x - corners[0].x, corners[1].y - corners[0].y);
+            const bottomWidth = Math.hypot(corners[2].x - corners[3].x, corners[2].y - corners[3].y);
+            const leftHeight = Math.hypot(corners[3].x - corners[0].x, corners[3].y - corners[0].y);
+            const rightHeight = Math.hypot(corners[2].x - corners[1].x, corners[2].y - corners[1].y);
+
+            const avgWidth = (topWidth + bottomWidth) / 2;
+            const avgHeight = (leftHeight + rightHeight) / 2;
+
+            // 输出尺寸严格按 1.586:1
+            const outputWidth = Math.round(Math.max(avgWidth, avgHeight * ID_CARD_RATIO));
+            const outputHeight = Math.round(outputWidth / ID_CARD_RATIO);
+
+            // 源点：检测到的四个角
+            const srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                corners[0].x, corners[0].y, // tl
+                corners[1].x, corners[1].y, // tr
+                corners[2].x, corners[2].y, // br
+                corners[3].x, corners[3].y  // bl
+            ]);
+
+            // 目标点：正俯视矩形，零边距（从(0,0)开始）
+            const dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [
+                0, 0,                     // tl
+                outputWidth - 1, 0,        // tr
+                outputWidth - 1, outputHeight - 1, // br
+                0, outputHeight - 1        // bl
+            ]);
+
+            const M = cv.getPerspectiveTransform(srcPts, dstPts);
+            const dst = new cv.Mat();
+            cv.warpPerspective(srcMat, dst, M, new cv.Size(outputWidth, outputHeight),
+                cv.INTER_CUBIC, cv.BORDER_CONSTANT, new cv.Scalar(255, 255, 255, 255));
+
+            srcPts.delete();
+            dstPts.delete();
+            M.delete();
+
+            return dst;
+        }
+
+        /**
+         * 边缘清理：去除算法补偿产生的微小白色边缘
+         * 对四边各做 1px 的内缩裁剪，仅用于消除不自然的直线白边
+         */
+        function cleanEdges(mat, shrinkPx = 1) {
+            const w = mat.cols - shrinkPx * 2;
+            const h = mat.rows - shrinkPx * 2;
+            if (w <= 0 || h <= 0) return mat;
+
+            const roi = new cv.Rect(shrinkPx, shrinkPx, w, h);
+            return mat.roi(roi).clone();
+        }
+
+        /**
+         * 将处理后的Mat转为可显示的格式
+         */
+        function matToCanvas(mat, canvas) {
+            canvas.width = mat.cols;
+            canvas.height = mat.rows;
+            cv.imshow(canvas, mat);
+        }
+
+        // ==================== 采集流程 ====================
+        function triggerCapture(corners) {
+            if (isCapturing) return;
+            isCapturing = true;
+
+            // 更新UI状态
+            referenceFrame.classList.add('capturing');
+            statusBar.textContent = '正在去除背景，请勿移动';
+            statusBar.classList.add('capturing');
+
+            // 短暂延迟确保画面稳定
+            setTimeout(() => {
+                executeCapture(corners);
+            }, 300);
+        }
+
+        function executeCapture(corners) {
+            try {
+                // 1. 从视频获取当前帧
+                processCtx.drawImage(videoEl, 0, 0, videoWidth, videoHeight);
+                const frameData = processCtx.getImageData(0, 0, videoWidth, videoHeight);
+                const srcMat = imageDataToMat(frameData);
+
+                // 2. 执行透视变换
+                const transformed = performPerspectiveTransform(srcMat, corners);
+
+                // 3. 转换为可显示的Canvas图像
+                const resultCanvas = document.createElement('canvas');
+                matToCanvas(transformed, resultCanvas);
+
+                // 4. 输出为PNG（带透明背景的格式，但这里是JPEG质量的PNG）
+                const dataUrl = resultCanvas.toDataURL('image/png', 1.0);
+
+                // 5. 显示结果
+                showResult(dataUrl, transformed.cols, transformed.rows);
+
+                // 清理
+                srcMat.delete();
+                transformed.delete();
+
+            } catch (err) {
+                console.error('采集处理失败:', err);
+                showToast('处理失败，请重试');
+                resetCaptureState();
+            }
+        }
+
+        function showResult(dataUrl, width, height) {
+            resultImage.src = dataUrl;
+            resultInfo.textContent = `尺寸: ${width} × ${height} px  |  比例: ${(width / height).toFixed(3)}:1`;
+            resultOverlay.classList.add('visible');
+
+            // 停止视频流
+            stopProcessing();
+
+            // 设置按钮事件
+            document.getElementById('btnDownload').onclick = () => {
+                const a = document.createElement('a');
+                a.href = dataUrl;
+                a.download = `身份证_${width}x${height}.png`;
+                a.click();
+            };
+
+            document.getElementById('btnCopy').onclick = async () => {
+                try {
+                    const blob = await (await fetch(dataUrl)).blob();
+                    await navigator.clipboard.write([
+                        new ClipboardItem({ [blob.type]: blob })
+                    ]);
+                    showToast('已复制到剪贴板');
+                } catch (e) {
+                    showToast('复制失败，请长按图片保存');
+                }
+            };
+
+            document.getElementById('btnRetake').onclick = () => {
+                resultOverlay.classList.remove('visible');
+                resetCaptureState();
+                startProcessingLoop();
+                videoEl.play();
+            };
+        }
+
+        function resetCaptureState() {
             isCapturing = false;
-            lastDetectTime = 0;
+            stableFrameCount = 0;
+            referenceFrame.classList.remove('capturing', 'detected');
+            statusBar.classList.remove('capturing');
+            statusBar.textContent = '请将身份证放入框内';
+            tiltIndicator.textContent = '请将身份证对准框内';
+            tiltIndicator.className = 'tilt-indicator';
+        }
 
+        // ==================== 主处理循环 ====================
+        function startProcessingLoop() {
             function loop(timestamp) {
-                if (isCapturing) return;
+                if (isCapturing || resultOverlay.classList.contains('visible')) {
+                    animationFrameId = requestAnimationFrame(loop);
+                    return;
+                }
 
-                // 节流：每隔 DETECT_INTERVAL 执行检测
-                if (timestamp - lastDetectTime >= DETECT_INTERVAL) {
-                    lastDetectTime = timestamp;
-                    if (cvReady) {
-                        detection = detectWithOpenCV();
+                // 控制处理频率
+                if (timestamp - lastProcessTime < PROCESS_INTERVAL_MS) {
+                    animationFrameId = requestAnimationFrame(loop);
+                    return;
+                }
+                lastProcessTime = timestamp;
+
+                if (!cvReady || !cameraReady || videoEl.readyState < 2) {
+                    animationFrameId = requestAnimationFrame(loop);
+                    return;
+                }
+
+                // 更新参考框尺寸（处理视频尺寸变化）
+                if (videoEl.videoWidth !== videoWidth || videoEl.videoHeight !== videoHeight) {
+                    updateReferenceFrame();
+                    setupCanvasSizes();
+                }
+
+                // 从视频获取当前帧
+                processCtx.drawImage(videoEl, 0, 0, videoWidth, videoHeight);
+                const frameData = processCtx.getImageData(0, 0, videoWidth, videoHeight);
+                const srcMat = imageDataToMat(frameData);
+
+                // 检测身份证角点
+                const corners = detectIDCardCorners(srcMat);
+                srcMat.delete();
+
+                // 绘制检测可视化
+                drawDebugOverlay(corners);
+
+                if (corners) {
+                    const tilt = calculateTilt(corners);
+                    const inFrame = isInReferenceFrame(corners);
+
+                    // 更新倾斜指示器
+                    if (tilt < MAX_TILT_DEGREES) {
+                        tiltIndicator.textContent = `倾斜: ${tilt.toFixed(1)}° ✓`;
+                        tiltIndicator.className = 'tilt-indicator good';
                     } else {
-                        detection = detectFallback();
+                        tiltIndicator.textContent = `倾斜: ${tilt.toFixed(1)}° 请摆正`;
+                        tiltIndicator.className = 'tilt-indicator warn';
                     }
 
-                    if (detection.compliant) {
-                        consecutiveFrames++;
+                    // 判断是否满足自动拍照条件
+                    if (tilt < MAX_TILT_DEGREES && inFrame) {
+                        referenceFrame.classList.add('detected');
+                        stableFrameCount++;
+
+                        if (stableFrameCount >= STABLE_FRAMES_REQUIRED) {
+                            statusBar.textContent = '识别成功，即将自动拍照…';
+                            if (!captureTimeoutId) {
+                                captureTimeoutId = setTimeout(() => {
+                                    captureTimeoutId = null;
+                                    triggerCapture(corners);
+                                }, CAPTURE_DELAY_MS);
+                            }
+                        } else {
+                            statusBar.textContent = `保持稳定… (${stableFrameCount}/${STABLE_FRAMES_REQUIRED})`;
+                        }
                     } else {
-                        consecutiveFrames = 0;
+                        referenceFrame.classList.remove('detected');
+                        stableFrameCount = 0;
+                        if (captureTimeoutId) {
+                            clearTimeout(captureTimeoutId);
+                            captureTimeoutId = null;
+                        }
+                        statusBar.textContent = inFrame
+                            ? '请摆正身份证 (倾斜角度过大)'
+                            : '请将身份证放入框内';
                     }
-
-                    // 达到连续帧数要求 → 自动拍照
-                    if (consecutiveFrames >= REQUIRED_FRAMES) {
-                        autoCapture();
-                        return;
-                    }
-                }
-
-                drawOverlay();
-                updateStatus();
-                rafId = requestAnimationFrame(loop);
-            }
-
-            rafId = requestAnimationFrame(loop);
-        }
-
-        // ========================
-        // OpenCV.js 检测
-        // ========================
-        function detectWithOpenCV() {
-            var src = null, gray = null, edges = null, contours = null, hierarchy = null;
-            var blurred = null, kernel = null, closed = null;
-            var thresh = null, edges2 = null, contours2 = null, hierarchy2 = null;
-            try {
-                src = cv.imread(video);
-                gray = new cv.Mat();
-                blurred = new cv.Mat();
-                edges = new cv.Mat();
-                contours = new cv.MatVector();
-                hierarchy = new cv.Mat();
-
-                cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-
-                // 双边滤波：保边去噪（比高斯模糊更适合边缘检测）
-                cv.bilateralFilter(gray, blurred, 5, 75, 75);
-
-                var frameArea = src.cols * src.rows;
-
-                // ===== 策略1: 低阈值 Canny + 形态学闭运算（处理低对比度白底场景） =====
-                cv.Canny(blurred, edges, 25, 80);
-                kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-                closed = new cv.Mat();
-                cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel);
-
-                cv.findContours(closed, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-                var bestQuad = findBestCardContour(contours, frameArea, src.cols, src.rows, guide);
-
-                // ===== 策略2: 自适应阈值（Canny 失败时，适合白底白卡场景） =====
-                if (!bestQuad) {
-                    thresh = new cv.Mat();
-                    cv.adaptiveThreshold(blurred, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                         cv.THRESH_BINARY_INV, 31, 5);
-                    edges2 = new cv.Mat();
-                    cv.Canny(thresh, edges2, 30, 90);
-                    contours2 = new cv.MatVector();
-                    hierarchy2 = new cv.Mat();
-                    cv.findContours(edges2, contours2, hierarchy2, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-                    bestQuad = findBestCardContour(contours2, frameArea, src.cols, src.rows, guide);
-                }
-
-                if (bestQuad) {
-                    var mean = cv.mean(gray);
-                    var brightness = mean[0];
-                    if (brightness < 35) {
-                        return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
-                    }
-                    if (brightness > 240) {
-                        return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
-                    }
-
-                    return { compliant: true, corners: bestQuad.corners, reason: '' };
-                }
-
-                return { compliant: false, corners: null, reason: '请将身份证四角对齐引导框' };
-
-            } catch (e) {
-                console.error('[CV] 检测出错:', e);
-                return { compliant: false, corners: null, reason: '检测异常' };
-            } finally {
-                if (src) src.delete();
-                if (gray) gray.delete();
-                if (blurred) blurred.delete();
-                if (edges) edges.delete();
-                if (contours) contours.delete();
-                if (hierarchy) hierarchy.delete();
-                if (kernel) kernel.delete();
-                if (closed) closed.delete();
-                if (thresh) thresh.delete();
-                if (edges2) edges2.delete();
-                if (contours2) contours2.delete();
-                if (hierarchy2) hierarchy2.delete();
-            }
-        }
-
-        // 在轮廓集合中找到最符合身份证特征的四边形
-        // 关键约束：四角必须在引导框内 + 面积覆盖率达标，排除非身份证物体
-        function findBestCardContour(contours, frameArea, frameW, frameH, guideObj) {
-            var bestQuad = null;
-            var bestArea = 0;
-            var guideArea = guideObj.width * guideObj.height;
-
-            // 引导框边界（留 3% 容差，允许微小偏移）
-            var marginX = guideObj.width * 0.03;
-            var marginY = guideObj.height * 0.03;
-            var guideLeft = guideObj.x + marginX;
-            var guideRight = guideObj.x + guideObj.width - marginX;
-            var guideTop = guideObj.y + marginY;
-            var guideBottom = guideObj.y + guideObj.height - marginY;
-
-            for (var i = 0; i < contours.size(); i++) {
-                var cnt = contours.get(i);
-                var area = cv.contourArea(cnt);
-
-                // 最小面积：帧面积的 8%，确保卡片足够大
-                if (area < frameArea * 0.08) {
-                    cnt.delete();
-                    continue;
-                }
-
-                var peri = cv.arcLength(cnt, true);
-                var approx = new cv.Mat();
-                cv.approxPolyDP(cnt, approx, 0.015 * peri, true);
-
-                if (approx.rows === 4) {
-                    var quad = [];
-                    for (var j = 0; j < 4; j++) {
-                        quad.push({
-                            x: approx.data32S[j * 2],
-                            y: approx.data32S[j * 2 + 1]
-                        });
-                    }
-
-                    // 【核心约束1】四角必须在引导框内
-                    var allInGuide = quad.every(function (p) {
-                        return p.x >= guideLeft &&
-                               p.x <= guideRight &&
-                               p.y >= guideTop &&
-                               p.y <= guideBottom;
-                    });
-
-                    // 宽高比检查（严格接近身份证 1.585）
-                    var w1 = dist(quad[0], quad[1]);
-                    var w2 = dist(quad[3], quad[2]);
-                    var h1 = dist(quad[0], quad[3]);
-                    var h2 = dist(quad[1], quad[2]);
-                    var w = Math.max(w1, w2);
-                    var h = Math.max(h1, h2);
-                    var aspect = w / h;
-                    var aspectOK = aspect > 1.4 && aspect < 1.8;
-
-                    // 填充率：轮廓面积 / 外接矩形面积，排除不规则形状
-                    var rect = cv.boundingRect(cnt);
-                    var fillRatio = area / (rect.width * rect.height);
-                    var fillOK = fillRatio > 0.7;
-
-                    // 【核心约束2】面积覆盖率：卡片必须占引导框 55% 以上
-                    // 防止小物体在框内也被误判为身份证
-                    var coverageOK = area > guideArea * 0.55;
-
-                    if (allInGuide && aspectOK && fillOK && coverageOK && area > bestArea) {
-                        bestArea = area;
-                        bestQuad = { corners: quad, area: area };
-                    }
-                }
-
-                approx.delete();
-                cnt.delete();
-            }
-
-            return bestQuad;
-        }
-
-        // ========================
-        // 降级检测（无 OpenCV.js）
-        // ========================
-        function detectFallback() {
-            try {
-                var tmpCanvas = document.createElement('canvas');
-                // 缩小到 1/2 提速
-                var sw = Math.round(video.videoWidth / 2);
-                var sh = Math.round(video.videoHeight / 2);
-                tmpCanvas.width = sw;
-                tmpCanvas.height = sh;
-                var tctx = tmpCanvas.getContext('2d');
-                tctx.drawImage(video, 0, 0, sw, sh);
-
-                // 按比例缩放引导框
-                var gx = guide.x / 2, gy = guide.y / 2;
-                var gw = guide.width / 2, gh = guide.height / 2;
-
-                // 采样引导框内中心区域
-                var margin = 8;
-                var innerData = tctx.getImageData(
-                    gx + margin, gy + margin,
-                    gw - 2 * margin, gh - 2 * margin
-                );
-                var innerAvg = avgBrightness(innerData);
-
-                // 亮度检查
-                if (innerAvg < 35) return { compliant: false, corners: null, reason: '光线太暗，请增加照明' };
-                if (innerAvg > 240) return { compliant: false, corners: null, reason: '光线过强，请避免反光' };
-
-                // 使用局部梯度检测边缘（比绝对亮度差更适合白底白卡）
-                // 在引导框四条边线位置采样，检测是否存在明显的梯度变化
-                var edgeThick = 4;
-                var innerEdge = tctx.getImageData(
-                    gx + margin, gy + margin,
-                    gw - 2 * margin, gh - 2 * margin
-                );
-                var outerTop = tctx.getImageData(gx, Math.max(0, gy - edgeThick), gw, edgeThick);
-                var outerBottom = tctx.getImageData(gx, Math.min(sh - edgeThick, gy + gh), gw, edgeThick);
-                var outerLeft = tctx.getImageData(Math.max(0, gx - edgeThick), gy, edgeThick, gh);
-                var outerRight = tctx.getImageData(Math.min(sw - edgeThick, gx + gw), gy, edgeThick, gh);
-
-                // 计算各区域亮度均值和标准差
-                var outerTopAvg = avgBrightness(outerTop);
-                var outerBottomAvg = avgBrightness(outerBottom);
-                var outerLeftAvg = avgBrightness(outerLeft);
-                var outerRightAvg = avgBrightness(outerRight);
-
-                // 白底白卡场景：差异可能很小，改用纹理方差检测
-                var innerVar = colorVariance(innerEdge);
-                var outerTopVar = colorVariance(outerTop);
-                var outerBottomVar = colorVariance(outerBottom);
-                var outerLeftVar = colorVariance(outerLeft);
-                var outerRightVar = colorVariance(outerRight);
-
-                // 卡片内部应该有文字纹理（方差较大），外部纯色桌面方差较小
-                // 或者内外有明显亮度差
-                var diffTop = Math.abs(innerAvg - outerTopAvg);
-                var diffBottom = Math.abs(innerAvg - outerBottomAvg);
-                var diffLeft = Math.abs(innerAvg - outerLeftAvg);
-                var diffRight = Math.abs(innerAvg - outerRightAvg);
-
-                var hasBrightnessDiff = diffTop > 18 || diffBottom > 18 ||
-                                         diffLeft > 18 || diffRight > 18;
-                // 要求至少3条边有亮度差异（排除随机物体）
-                var edgeDiffCount = (diffTop > 18 ? 1 : 0) + (diffBottom > 18 ? 1 : 0) +
-                                    (diffLeft > 18 ? 1 : 0) + (diffRight > 18 ? 1 : 0);
-                var hasStrongBrightnessDiff = edgeDiffCount >= 3;
-
-                var hasTextureDiff = (innerVar > 15 && innerVar > outerTopVar * 1.3 &&
-                                      innerVar > outerBottomVar * 1.3 &&
-                                      innerVar > outerLeftVar * 1.3 &&
-                                      innerVar > outerRightVar * 1.3);
-
-                if ((hasStrongBrightnessDiff || hasTextureDiff) && innerVar > 8 && innerAvg > 40 && innerAvg < 230) {
-                    return { compliant: true, corners: null, reason: '' };
-                }
-
-                return { compliant: false, corners: null, reason: '请将身份证四角对齐引导框' };
-            } catch (e) {
-                console.error('[Fallback] 检测出错:', e);
-                return { compliant: false, corners: null, reason: '检测异常' };
-            }
-        }
-
-        function avgBrightness(imageData) {
-            var data = imageData.data;
-            var sum = 0;
-            var count = data.length / 4;
-            for (var i = 0; i < data.length; i += 4) {
-                sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
-            }
-            return sum / count;
-        }
-
-        function colorVariance(imageData) {
-            var data = imageData.data;
-            var sum = 0, sumSq = 0;
-            var count = data.length / 4;
-            for (var i = 0; i < data.length; i += 4) {
-                var v = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                sum += v;
-                sumSq += v * v;
-            }
-            var mean = sum / count;
-            return Math.sqrt(sumSq / count - mean * mean);
-        }
-
-        // ========================
-        // 绘制覆盖层
-        // ========================
-        function drawOverlay() {
-            var ctx = overlayCtx;
-            var w = overlay.width;
-            var h = overlay.height;
-
-            ctx.clearRect(0, 0, w, h);
-
-            // 轻微暗化背景
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
-            ctx.fillRect(0, 0, w, h);
-
-            // 挖空引导框区域（让引导框内部更亮）
-            ctx.clearRect(guide.x, guide.y, guide.width, guide.height);
-            ctx.fillStyle = 'rgba(0, 0, 0, 0)';
-            ctx.fillRect(guide.x, guide.y, guide.width, guide.height);
-
-            // 绘制引导框四角标记（醒目标识，提示用户四角必须对齐）
-            var markerColor = detection.compliant ? '#00d97e' : 'rgba(255, 255, 255, 0.9)';
-            var markerSize = Math.max(24, w / 18);
-            drawCornerMarkers(ctx, guide, markerColor, markerSize);
-
-            // 引导框边框（细线，辅助参考）
-            ctx.strokeStyle = detection.compliant ? 'rgba(0, 217, 126, 0.4)' : 'rgba(255, 255, 255, 0.25)';
-            ctx.lineWidth = Math.max(1, w / 600);
-            ctx.setLineDash([6, 6]);
-            drawRoundedRect(ctx, guide.x, guide.y, guide.width, guide.height, 12);
-            ctx.stroke();
-            ctx.setLineDash([]);
-
-            // 绘制检测到的卡片轮廓
-            if (detection.corners && detection.corners.length === 4) {
-                ctx.strokeStyle = detection.compliant ? 'rgba(0, 217, 126, 0.8)' : 'rgba(250, 173, 20, 0.8)';
-                ctx.lineWidth = 3;
-                ctx.setLineDash([8, 4]);
-                ctx.beginPath();
-                ctx.moveTo(detection.corners[0].x, detection.corners[0].y);
-                for (var k = 1; k < 4; k++) {
-                    ctx.lineTo(detection.corners[k].x, detection.corners[k].y);
-                }
-                ctx.closePath();
-                ctx.stroke();
-                ctx.setLineDash([]);
-
-                // 绘制四角点
-                ctx.fillStyle = detection.compliant ? '#00d97e' : '#faad14';
-                for (var ci = 0; ci < 4; ci++) {
-                    ctx.beginPath();
-                    ctx.arc(detection.corners[ci].x, detection.corners[ci].y, Math.max(5, w / 150), 0, 2 * Math.PI);
-                    ctx.fill();
-                }
-            }
-
-            // 绘制自动拍照进度条
-            if (consecutiveFrames > 0 && !isCapturing) {
-                var progress = consecutiveFrames / REQUIRED_FRAMES;
-                var barY = guide.y + guide.height + 8;
-                var barH = 4;
-
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-                roundRectPath(ctx, guide.x, barY, guide.width, barH, 2);
-                ctx.fill();
-
-                ctx.fillStyle = '#00d97e';
-                roundRectPath(ctx, guide.x, barY, guide.width * progress, barH, 2);
-                ctx.fill();
-
-                // 进度文字
-                ctx.fillStyle = '#fff';
-                ctx.font = Math.max(12, w / 60) + 'px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText('正在识别 ' + Math.round(progress * 100) + '%', w / 2, guide.y - 12);
-            } else if (!detection.compliant) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-                ctx.font = Math.max(12, w / 60) + 'px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(currentSide === 'front' ? '请将身份证正面四角对齐引导框' : '请将身份证背面四角对齐引导框', w / 2, guide.y - 12);
-            }
-        }
-
-        function drawRoundedRect(ctx, x, y, w, h, r) {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.arcTo(x + w, y, x + w, y + h, r);
-            ctx.arcTo(x + w, y + h, x, y + h, r);
-            ctx.arcTo(x, y + h, x, y, r);
-            ctx.arcTo(x, y, x + w, y, r);
-            ctx.closePath();
-        }
-
-        function roundRectPath(ctx, x, y, w, h, r) {
-            r = Math.min(r, w / 2, h / 2);
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-        }
-
-        function drawCornerMarkers(ctx, g, color, size) {
-            var lw = Math.max(3, overlay.width / 200);
-            ctx.strokeStyle = color;
-            ctx.lineWidth = lw;
-            ctx.lineCap = 'round';
-
-            // 左上
-            ctx.beginPath();
-            ctx.moveTo(g.x, g.y + size);
-            ctx.lineTo(g.x, g.y);
-            ctx.lineTo(g.x + size, g.y);
-            ctx.stroke();
-
-            // 右上
-            ctx.beginPath();
-            ctx.moveTo(g.x + g.width - size, g.y);
-            ctx.lineTo(g.x + g.width, g.y);
-            ctx.lineTo(g.x + g.width, g.y + size);
-            ctx.stroke();
-
-            // 右下
-            ctx.beginPath();
-            ctx.moveTo(g.x + g.width, g.y + g.height - size);
-            ctx.lineTo(g.x + g.width, g.y + g.height);
-            ctx.lineTo(g.x + g.width - size, g.y + g.height);
-            ctx.stroke();
-
-            // 左下
-            ctx.beginPath();
-            ctx.moveTo(g.x + size, g.y + g.height);
-            ctx.lineTo(g.x, g.y + g.height);
-            ctx.lineTo(g.x, g.y + g.height - size);
-            ctx.stroke();
-        }
-
-        // ========================
-        // 状态文字更新
-        // ========================
-        function updateStatus() {
-            if (isCapturing) return;
-
-            if (detection.compliant) {
-                var pct = Math.round((consecutiveFrames / REQUIRED_FRAMES) * 100);
-                statusText.textContent = '已识别身份证，保持稳定... ' + pct + '%';
-                statusText.className = 'status-bar success';
-            } else {
-                statusText.textContent = detection.reason || '请将身份证放入画面中';
-                statusText.className = 'status-bar';
-            }
-        }
-
-        // ========================
-        // 自动拍照
-        // ========================
-        function autoCapture() {
-            if (isCapturing) return;
-            isCapturing = true;
-            capturePhoto();
-        }
-
-        // ========================
-        // 手动拍照
-        // ========================
-        function manualCapture() {
-            if (isCapturing) return;
-            isCapturing = true;
-            capturePhoto();
-        }
-
-        // ========================
-        // 拍照 + 裁剪
-        // ========================
-        function capturePhoto() {
-            // 闪光动画
-            flashEl.classList.add('flash-active');
-            setTimeout(function () { flashEl.classList.remove('flash-active'); }, 150);
-
-            // 震动反馈（移动端）
-            if (navigator.vibrate) navigator.vibrate(100);
-
-            if (rafId) {
-                cancelAnimationFrame(rafId);
-                rafId = null;
-            }
-
-            setTimeout(function () {
-                var dataUrl;
-                if (cvReady && detection.corners && detection.corners.length === 4) {
-                    dataUrl = captureWithPerspective();
                 } else {
-                    dataUrl = captureByGuideCrop();
+                    referenceFrame.classList.remove('detected');
+                    stableFrameCount = 0;
+                    if (captureTimeoutId) {
+                        clearTimeout(captureTimeoutId);
+                        captureTimeoutId = null;
+                    }
+                    tiltIndicator.textContent = '请将身份证对准框内';
+                    tiltIndicator.className = 'tilt-indicator';
+                    statusBar.textContent = '正在搜索身份证…';
                 }
 
-                if (!dataUrl) {
-                    console.warn('拍照失败，使用引导框裁剪');
-                    dataUrl = captureByGuideCrop();
-                }
+                animationFrameId = requestAnimationFrame(loop);
+            }
 
-                // 保存并进入预览
-                if (currentSide === 'front') {
-                    frontDataUrl = dataUrl;
-                } else {
-                    backDataUrl = dataUrl;
-                }
-
-                stopCamera();
-                showPreview(dataUrl);
-            }, 200);
+            animationFrameId = requestAnimationFrame(loop);
         }
 
-        // 透视变换裁剪（仅保存身份证主体）
-        function captureWithPerspective() {
-            var src = null, dst = null, M = null, srcTri = null, dstTri = null;
-            try {
-                src = cv.imread(video);
-
-                // 排序四角点：TL, TR, BR, BL
-                var pts = orderPoints(detection.corners);
-
-                // 计算输出尺寸
-                var widthTop = dist(pts[0], pts[1]);
-                var widthBottom = dist(pts[3], pts[2]);
-                var heightLeft = dist(pts[0], pts[3]);
-                var heightRight = dist(pts[1], pts[2]);
-
-                var outW = Math.round(Math.max(widthTop, widthBottom));
-                var outH = Math.round(Math.max(heightLeft, heightRight));
-
-                // 确保最小尺寸
-                outW = Math.max(outW, 200);
-                outH = Math.max(outH, 126);
-
-                srcTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                    pts[0].x, pts[0].y,
-                    pts[1].x, pts[1].y,
-                    pts[2].x, pts[2].y,
-                    pts[3].x, pts[3].y
-                ]);
-                dstTri = cv.matFromArray(4, 1, cv.CV_32FC2, [
-                    0, 0,
-                    outW, 0,
-                    outW, outH,
-                    0, outH
-                ]);
-
-                M = cv.getPerspectiveTransform(srcTri, dstTri);
-                dst = new cv.Mat();
-                cv.warpPerspective(src, dst, M, new cv.Size(outW, outH),
-                    cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(0, 0, 0, 255));
-
-                // 输出到临时 canvas
-                var outCanvas = document.createElement('canvas');
-                outCanvas.width = outW;
-                outCanvas.height = outH;
-                cv.imshow(outCanvas, dst);
-
-                // 裁掉边缘 5%（消除检测误差导致的白边/阴影/背景）
-                var trim = 0.05;
-                var trimX = Math.round(outW * trim);
-                var trimY = Math.round(outH * trim);
-                var finalCanvas = document.createElement('canvas');
-                finalCanvas.width = outW - 2 * trimX;
-                finalCanvas.height = outH - 2 * trimY;
-                var fctx = finalCanvas.getContext('2d');
-                fctx.drawImage(outCanvas, trimX, trimY,
-                              finalCanvas.width, finalCanvas.height,
-                              0, 0, finalCanvas.width, finalCanvas.height);
-
-                return finalCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
-            } catch (e) {
-                console.error('[CV] 透视变换失败:', e);
-                return null;
-            } finally {
-                if (src) src.delete();
-                if (dst) dst.delete();
-                if (M) M.delete();
-                if (srcTri) srcTri.delete();
-                if (dstTri) dstTri.delete();
+        function stopProcessing() {
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            if (captureTimeoutId) {
+                clearTimeout(captureTimeoutId);
+                captureTimeoutId = null;
             }
         }
 
-        // 引导框裁剪（降级方案）
-        function captureByGuideCrop() {
-            var tmpCanvas = document.createElement('canvas');
-            tmpCanvas.width = video.videoWidth;
-            tmpCanvas.height = video.videoHeight;
-            var tctx = tmpCanvas.getContext('2d');
-            tctx.drawImage(video, 0, 0);
+        /**
+         * 在调试Canvas上绘制检测到的角点和连线
+         */
+        function drawDebugOverlay(corners) {
+            debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
 
-            // 引导框比身份证大，裁掉边缘 6% 收紧到卡片主体
-            var trim = 0.06;
-            var cropX = guide.x + guide.width * trim;
-            var cropY = guide.y + guide.height * trim;
-            var cropW = guide.width * (1 - 2 * trim);
-            var cropH = guide.height * (1 - 2 * trim);
+            if (!corners) return;
 
-            var cropCanvas = document.createElement('canvas');
-            cropCanvas.width = Math.round(cropW);
-            cropCanvas.height = Math.round(cropH);
-            var cctx = cropCanvas.getContext('2d');
-            cctx.drawImage(tmpCanvas, cropX, cropY, cropW, cropH,
-                          0, 0, cropCanvas.width, cropCanvas.height);
+            // 绘制角点
+            corners.forEach((c, i) => {
+                debugCtx.beginPath();
+                debugCtx.arc(c.x, c.y, 8, 0, Math.PI * 2);
+                const colors = ['#ff4444', '#44ff44', '#4444ff', '#ffaa00'];
+                debugCtx.fillStyle = colors[i];
+                debugCtx.fill();
+                debugCtx.strokeStyle = '#fff';
+                debugCtx.lineWidth = 2;
+                debugCtx.stroke();
+            });
 
-            return cropCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
+            // 绘制连线
+            debugCtx.strokeStyle = 'rgba(0, 255, 100, 0.7)';
+            debugCtx.lineWidth = 2.5;
+            debugCtx.setLineDash([6, 3]);
+            debugCtx.beginPath();
+            debugCtx.moveTo(corners[0].x, corners[0].y);
+            debugCtx.lineTo(corners[1].x, corners[1].y);
+            debugCtx.lineTo(corners[2].x, corners[2].y);
+            debugCtx.lineTo(corners[3].x, corners[3].y);
+            debugCtx.closePath();
+            debugCtx.stroke();
+            debugCtx.setLineDash([]);
         }
 
-        // 点排序
-        function orderPoints(pts) {
-            var sorted = pts.slice();
-            // 按 x+y 升序：左上最小，右下最大
-            sorted.sort(function (a, b) { return (a.x + a.y) - (b.x + b.y); });
-            var tl = sorted[0];
-            var br = sorted[3];
-            // 剩余两个按 y-x 区分：右上(y-x 最小)，左下(y-x 最大)
-            var mid = [sorted[1], sorted[2]];
-            mid.sort(function (a, b) { return (a.y - a.x) - (b.y - b.x); });
-            var tr = mid[0];
-            var bl = mid[1];
-            return [tl, tr, br, bl];
+        // ==================== 窗口大小自适应 ====================
+        function handleResize() {
+            updateReferenceFrame();
+            setupCanvasSizes();
         }
 
-        function dist(a, b) {
-            var dx = a.x - b.x;
-            var dy = a.y - b.y;
-            return Math.sqrt(dx * dx + dy * dy);
-        }
-
-        // ========================
-        // UI 流程控制
-        // ========================
-        function showCamera(side) {
-            currentSide = side;
-            isCapturing = false;
-            consecutiveFrames = 0;
-
-            // 更新标题
-            cameraTitle.textContent = side === 'front' ? '拍摄身份证 — 正面' : '拍摄身份证 — 背面';
-            statusText.textContent = '请将身份证四角对齐引导框';
-            statusText.className = 'status-bar';
-
-            // 更新步骤指示器
-            updateStepIndicator(side === 'front' ? 1 : 2);
-
-            // 切换页面
-            startScreen.style.display = 'none';
-            previewScreen.style.display = 'none';
-            completeScreen.style.display = 'none';
-            cameraScreen.style.display = 'flex';
-
-            startCamera();
-        }
-
-        function showPreview(dataUrl) {
-            previewImage.src = dataUrl;
-            previewTitle.textContent = currentSide === 'front' ? '预览 — 正面' : '预览 — 背面';
-
-            cameraScreen.style.display = 'none';
-            previewScreen.style.display = 'flex';
-        }
-
-        function showComplete() {
-            $('final-front').src = frontDataUrl;
-            $('final-back').src = backDataUrl;
-
-            updateStepIndicator(3);
-
-            previewScreen.style.display = 'none';
-            completeScreen.style.display = 'flex';
-        }
-
-        function updateStepIndicator(step) {
-            var dots = [$('step-1'), $('step-2'), $('step-3')];
-            var bars = [$('bar-1'), $('bar-2')];
-
-            for (var i = 0; i < 3; i++) {
-                dots[i].className = 'step-dot';
-                if (i < step - 1) dots[i].className += ' done';
-                else if (i === step - 1) dots[i].className += ' active';
-            }
-            for (var j = 0; j < 2; j++) {
-                bars[j].className = 'step-bar';
-                if (j < step - 1) bars[j].className += ' done';
-            }
-        }
-
-        // ========================
-        // 事件绑定
-        // ========================
-        $('start-btn').addEventListener('click', function () {
-            showCamera('front');
+        window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', () => {
+            setTimeout(handleResize, 300);
         });
 
-        $('manual-btn').addEventListener('click', manualCapture);
+        // ==================== 启动 ====================
+        function bootstrap() {
+            // 检测是否为HTTPS或localhost
+            const isSecure = location.protocol === 'https:' ||
+                location.hostname === 'localhost' ||
+                location.hostname === '127.0.0.1';
 
-        $('retake-btn').addEventListener('click', function () {
-            showCamera(currentSide);
-        });
+            if (!isSecure && !location.hostname.includes('10.2.35')) {
+                // 对于自签名HTTPS调试地址允许通过
+                loadingText.textContent = '需要HTTPS环境才能使用摄像头';
+                return;
+            }
 
-        $('confirm-btn').addEventListener('click', function () {
-            if (currentSide === 'front') {
-                showCamera('back');
+            // 检测OpenCV
+            if (typeof cv !== 'undefined' && cv.Mat) {
+                cvReady = true;
+                loadingText.textContent = '引擎就绪，启动摄像头…';
+                initCamera();
             } else {
-                showComplete();
+                // OpenCV 仍在加载
+                initOpenCV();
+            }
+        }
+
+        // 页面加载完成后启动
+        if (document.readyState === 'complete') {
+            bootstrap();
+        } else {
+            window.addEventListener('load', bootstrap);
+        }
+
+        // ==================== 页面销毁时清理 ====================
+        window.addEventListener('beforeunload', () => {
+            stopProcessing();
+            if (videoEl.srcObject) {
+                videoEl.srcObject.getTracks().forEach(t => t.stop());
             }
         });
-
-        $('submit-btn').addEventListener('click', function () {
-            alert('提交成功！\n\n身份证正面和背面已采集完成。');
-            // 实际项目中可在此处上传 frontDataUrl 和 backDataUrl
-            console.log('Front:', frontDataUrl ? frontDataUrl.substring(0, 50) + '...' : 'null');
-            console.log('Back:', backDataUrl ? backDataUrl.substring(0, 50) + '...' : 'null');
-        });
-
-        // ========================
-        // 初始化
-        // ========================
-        checkCv();
-
     })();
     </script>
 </body>
