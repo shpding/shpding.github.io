@@ -8,8 +8,8 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:#000;overflow:hidden;height:100dvh;width:100vw;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
 .scanner-container{position:relative;width:100%;height:100dvh;overflow:hidden;background:#000}
-#videoElement{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
-#overlayCanvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;transform:scaleX(-1)}
+#videoElement{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+#overlayCanvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10}
 .reference-frame{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);border:2.5px solid rgba(0,200,100,.7);border-radius:6px;box-shadow:0 0 0 9999px rgba(0,0,0,.55),inset 0 0 30px rgba(0,200,100,.08);pointer-events:none;z-index:9;transition:border-color .3s,box-shadow .3s}
 .reference-frame.detected{border-color:rgba(0,255,80,.9);box-shadow:0 0 0 9999px rgba(0,0,0,.55),inset 0 0 30px rgba(0,255,80,.12),0 0 20px rgba(0,255,80,.15)}
 .reference-frame.capturing{border-color:#fff;box-shadow:0 0 0 9999px rgba(0,0,0,.7),0 0 40px rgba(255,255,255,.3)}
@@ -44,6 +44,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 .loading-text{font-size:15px;color:#aaa}
 .error-toast{position:absolute;top:6%;left:50%;transform:translateX(-50%);z-index:300;padding:10px 20px;border-radius:8px;background:rgba(255,60,60,.9);color:#fff;font-size:14px;pointer-events:none;opacity:0;transition:opacity .3s}
 .error-toast.show{opacity:1}
+.live-preview{position:absolute;top:16px;right:16px;z-index:50;border-radius:8px;overflow:hidden;background:rgba(0,0,0,.7);border:2px solid rgba(255,255,255,.25);opacity:0;transform:translateY(-10px);transition:opacity .3s,transform .3s;pointer-events:none}
+.live-preview.visible{opacity:1;transform:translateY(0)}
+.live-preview canvas{display:block;width:120px;height:auto;image-rendering:auto}
+.live-preview .preview-label{position:absolute;top:4px;left:6px;font-size:10px;color:rgba(255,255,255,.7);text-shadow:0 1px 2px rgba(0,0,0,.8)}
 </style>
 </head>
 <body>
@@ -59,6 +63,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
     <div class="loading-overlay" id="loadingOverlay">
         <div class="spinner"></div>
         <div class="loading-text" id="loadingText">启动摄像头…</div>
+    </div>
+    <div class="live-preview" id="livePreview">
+        <span class="preview-label">预览</span>
+        <canvas id="previewCanvas" width="120" height="76"></canvas>
     </div>
     <div class="error-toast" id="errorToast"></div>
     <div class="result-overlay" id="resultOverlay">
@@ -94,6 +102,9 @@ const resultOverlay = document.getElementById('resultOverlay');
 const resultImage = document.getElementById('resultImage');
 const resultInfo = document.getElementById('resultInfo');
 const scannerContainer = document.getElementById('scannerContainer');
+const livePreview = document.getElementById('livePreview');
+const previewCanvas = document.getElementById('previewCanvas');
+const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
 
 // ==================== 常量 ====================
 const ID_CARD_RATIO = 1.586;
@@ -559,9 +570,41 @@ function resetState() {
     statusBar.textContent = '请将身份证放入框内';
     tiltIndicator.textContent = '请将身份证对准框内';
     tiltIndicator.className = 'tilt-indicator';
+    livePreview.classList.remove('visible');
 }
 
-// ==================== 绘制叠加层 ====================
+// ==================== 实时预览 ====================
+function updateLivePreview(cornersSmall, procW, procH, frameData) {
+    if (!cornersSmall) {
+        if (livePreview.classList.contains('visible')) {
+            livePreview.classList.remove('visible');
+        }
+        return;
+    }
+
+    // 用小分辨率做快速透视变换用于预览
+    const avgW = (Math.hypot(cornersSmall[1].x-cornersSmall[0].x, cornersSmall[1].y-cornersSmall[0].y) +
+                  Math.hypot(cornersSmall[2].x-cornersSmall[3].x, cornersSmall[2].y-cornersSmall[3].y)) / 2;
+    const pvw = Math.min(120, Math.round(avgW * 0.5));
+    const pvh = Math.round(pvw / ID_CARD_RATIO);
+
+    const result = warpPerspective(frameData.data, procW, procH, cornersSmall, pvw, pvh);
+    if (!result) return;
+
+    // 用临时canvas合成，因为preview canvas尺寸可能不同
+    const tmp = document.createElement('canvas');
+    tmp.width = pvw; tmp.height = pvh;
+    tmp.getContext('2d').putImageData(result, 0, 0);
+
+    previewCanvas.width = pvw;
+    previewCanvas.height = pvh;
+    previewCtx.clearRect(0, 0, pvw, pvh);
+    previewCtx.drawImage(tmp, 0, 0);
+
+    if (!livePreview.classList.contains('visible')) {
+        livePreview.classList.add('visible');
+    }
+}
 function drawOverlay(corners) {
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     if (!corners) return;
@@ -617,6 +660,9 @@ function startLoop() {
         const frameData = procCtx.getImageData(0, 0, procW, procH);
 
         const cornersSmall = detectCorners(frameData, procW, procH);
+
+        // 更新实时预览
+        updateLivePreview(cornersSmall, procW, procH, frameData);
 
         if (cornersSmall) {
             const scaleX = videoW / procW;
