@@ -516,7 +516,9 @@ function triggerCapture(cornersFullRes) {
 
     setTimeout(() => {
         try {
-            // 获取全分辨率帧
+            // 切换到全分辨率画布获取高质量帧
+            procCanvas.width = videoW;
+            procCanvas.height = videoH;
             procCtx.drawImage(videoEl, 0, 0, videoW, videoH);
             const frameData = procCtx.getImageData(0, 0, videoW, videoH);
 
